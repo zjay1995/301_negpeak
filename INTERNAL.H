@@ -1,0 +1,307 @@
+//#define INTERNAL()   1 // 0 - External via COM, 1 - Internal - via USB or internal card . Moved here from below#ifndef  _INTERNAL_H
+#define  _INTERNAL_H 1
+
+
+ #define INTERNAL()   1 //moved up. P.P. 09/02/18
+//#define INTERNAL()   0 // 0 - External via COM, 1 - Internal - via USB or internal card
+#define INTERNAL_RC  1 // cannot use () in .RC compiler -
+
+
+#ifndef RC_INVOKED
+#if (INTERNAL() && !defined INTERNAL_RC) || (!INTERNAL() && defined INTERNAL_RC)
+ #error INTERNAL() and INTERNAL_RC conflict
+#endif
+
+// Defines are numbered to make a code for the variant compiled. P.P. 06/27/04
+
+#if INTERNAL()
+  #define _NOCOMM() 0
+#else
+  #define _NOCOMM() 0
+#endif
+
+
+#ifndef __TURBOC__
+  #undef _NOCOMM
+  #define _NOCOMM() 1
+#endif
+
+//#define DEMO() 1           // DEMO()                      bit 3
+#define DEMO() 0
+
+#define MAX_POINTS 32          // always if internal
+
+#if INTERNAL()
+//#define GC312()      1   // added P.P. 03/18/06		   bit 58
+#define GC312()      0
+//#define GC321() 1  // work without valves. P.P. 03/29/02    bit 12
+#define GC321() 0  // work with valves. P.P. 06/06/02
+//#define GC501() 1          // added P.P. 04/03/06             bit 28
+#define GC501() 0
+//#define GC326()    1     // new define bcs the oven door operates differently from GC321/322
+#define GC326()    0
+//#define STAND_ALONE() 1      // STAND_ALONE()               bit 13
+#define STAND_ALONE() 0
+//#define OPTICS() 1         // OPTICS()                      bit 34
+#define OPTICS() 0
+//#define OLIN()		1  // added P.P. 10/23/04              bit 39
+#define OLIN()	0
+#define ETHUS()   1  // P.P. 12/16/18 - Specific modbus request
+//#define ETHUS()   0  // P.P. 12/16/18 - standard modbus code
+
+//#define POINTS() 3             // Number be added to the code as -4
+//#define POINTS() 2             // Number be added to the code as -4
+//#define POINTS() 6       //
+//#define POINTS() 1       // 1-point variant. P.P. 12/15/01
+//#define POINTS() 25       // 25-point variant. P.P. 03/25/11
+//#define POINTS() 8       // 8-point 301B. P.P. 08/13/04
+//#define POINTS() 12       //  12-point 301c. 11/04/07
+//#define POINTS() 32         // new Edit Comp Dialog. P.P. 09/10/04
+//#define POINTS() 10       // 10-point variant. P.P. 04/08/05
+//#define POINTS() 20       // 20-point variant. P.P. 05/13/11
+#define POINTS() 15       // 20-point variant. P.P. 05/13/11
+
+//#define HIGH_CONC_POINTS() 1
+#define HIGH_CONC_POINTS() 0
+
+#define OVEN_EQ_INJ() 1 // in GC301B, Oven and injector temperatures are equal
+//#define OVEN_EQ_INJ() 0 // in 321_USB, 2 temperature zones. P.P. 03/08/02
+
+//#define PULSING_OVEN()   1 // P.P. 05/01/13
+#define PULSING_OVEN()   0 // P.P. 05/01/13
+
+//#define RAMPING() 1          // RAMPING()                   bit 19                               bit 19
+#define RAMPING() 0   // for 501c. P.P. 12/20/02
+
+#define SAMPLE_AHEAD() 1  // added. P.P. 05/25/04             bit 32
+//#define SAMPLE_AHEAD() 0
+
+//#define QUICK_SCAN() 1   // added. P.P. 12/14/10
+#define QUICK_SCAN() 0
+
+//#define CONCENTRATOR() 1 // added. P.P. 08/01/02.           bit 21
+#define CONCENTRATOR() 0  //
+
+//#define FID() 1 // added. P.P. 06/28/05  Conc + fid variant. P.P. 11/22/17       bit 52
+#define FID() 0
+
+//#define TCD() 1           // added. P.P. 07/05/04             bit 35
+#define TCD() 0
+
+//#define IN_4_20()     1   //added for 4-20mA input, to shift it. P.P. 05/22/09
+#define IN_4_20()     0
+
+#define PRESSURE_SENSOR()  1  // added P.P. 10/22/09
+//#define PRESSURE_SENSOR()  0
+
+//#define H2_PRESSURE_SENSOR() 1 // P.P. 11/22/17
+#define H2_PRESSURE_SENSOR() 0 // P.P. 11/22/17
+
+//#define HUMIDITY_SENSOR() 1
+#define HUMIDITY_SENSOR() 0   // P.P. 11/22/17
+
+//#define TEMP_GRAPH()  1 // P.P. 07/30/18
+#define TEMP_GRAPH()  0 // P.P. 07/30/18
+
+#define NO_CAL_START() 1  // added P.P. 10/12/03 to prevent   bit 31
+//#define NO_CAL_START() 0 //auto cal on startup.
+
+//#define MANUAL_INJ()     1    // added, no valves. P.P. 05/12/06    bit 62 +stand_alone = temp control via 1608 board. P.P. 01/04/16
+#define MANUAL_INJ()     0
+
+//#define TIME_MULT()  1		//to use inj time < 1s. 03/16/08
+#define TIME_MULT()	0
+
+#define MODBUS() 1                                   // bit 46
+//#define MODBUS() 0
+
+#define X1_VALVE()      1  // added. P.P. 12/10/04                     bit 43
+//#define X1_VALVE()      0
+#if X1_VALVE()
+//#define LAMP_DELAYED()  1  // variand with lamp delayed until X1_time. P.P. 10/06/09
+#define LAMP_DELAYED()  0
+#else
+#define LAMP_DELAYED()  0 // it can be used only with X1_time
+#endif //X1_TIME
+
+//#define FLAME() 1          // FLAME()                       bit 22
+#define FLAME() 0            // FLAME()
+
+#define FLOW() 1      // added to show flow. P.P. 11/17/02    bit 25
+//#define FLOW() 0
+
+//#define FLOW_RATE()       1   // to switch flow rate high/low. P.P. 05/13/18
+#define FLOW_RATE()       0
+
+//#define ANALOG_OUTPUT() 1 // added. P.P. 10/04/02             bit 17
+#define ANALOG_OUTPUT() 0  // for 501c. P.P. 12/20/02
+
+//#define ANALOG_MIX() 1   // added for multipoint but all      bit 18
+#define ANALOG_MIX() 0 // points to the same outputs. P.P. 05/02/04
+
+//#define ANALOG_DELAYED() 1   // in 501, 301, if mix and multipoint. bit 33
+#define ANALOG_DELAYED() 0
+
+//#define SHIFT_REPORT() 1 //?? OK. P.P.                               bit 38
+#define SHIFT_REPORT() 0 //??
+
+#define Get_Data_Bipolar() 1 //  P.P. 07/05/02
+//#define Get_Data_Bipolar() 0 //
+
+//#define USE_TOTAL() 1      // USE_TOTAL()                   bit 24
+#define USE_TOTAL() 0
+
+//#define USE_DIFFERENCE() 1 // added. P.P. 08/01/04            bit 36
+#define USE_DIFFERENCE() 0
+
+//#define BTU() 1
+#define BTU() 0
+
+//#define REMOTE_CAL() 1       //                               bit 26
+#define REMOTE_CAL() 0   // 10 point 501c. P.P. 12/20/02
+
+#define DIAGNOSTICS() 0  // for 501c. P.P. 02/17/03           bit 27
+//#define DIAGNOSTICS() 1  // Sweden 301c. P.P. 10/17/03
+
+//#define ALL_ERR_CAL() 1  // added. P.P. 06/28/03            bit 29
+#define ALL_ERR_CAL() 0
+
+#define NO_ALARMS()   1    // added for GC without alarms. P.P. 05/03/11
+//#define NO_ALARMS()   0
+
+#define ALARM_NC() 	1 // NC relays for HL_alarms. P.P. 12/05/04    bit 42
+//#define ALARM_NC() 	0 // NO relays for all alarms
+
+//#define COMMON_HIGH()   1         // added. P.P. 01/11/05                bit 45
+#define COMMON_HIGH()   0
+
+//#define AREA_ALL() 1  // P.P. 12/21/11
+#define AREA_ALL() 0  // P.P. 12/21/11
+
+//#define WATER_PUMP()    1    // P.P. 12/31/16
+#define WATER_PUMP()    0
+
+//#define TWO_COLUMNS()     1
+#define TWO_COLUMNS()     0
+
+//#define HEATED_LINE()     1   // P.P. 03/28/17
+#define HEATED_LINE()     0
+
+//#define SERIAL_NUMBER()   1
+#define SERIAL_NUMBER()   0
+
+//#define SCAN_CHANNELS()   1
+#define SCAN_CHANNELS()   0
+
+#define NOISE_REDUCT()		8 // noise divider, known peaks only. P.P.12/11/04 bit 44
+//#define NOISE_REDUCT()	1  // regular case, known peaks only.            bit 44
+//#define NOISE_REDUCT()	0  // regular case, all peaks shown.
+
+#define HV_501() 1     // P.P. 11/30/02 - to control Lamp     bit 20
+//#define HV_501() 0   //if 501 HV board is used.
+
+// boards in the GC: 
+
+#define CBW() 1                // CBW()                       bit 14
+//#define CBW() 0
+
+#define PMD_16FS()  1    // 16-bit USB device. P.P. 11/06/04  bit 40
+//#define PMD_16FS()  0
+
+//#define PMD_12LS()  1  // 12-bit USB device. P.P. 11/06/04  bit 41
+#define PMD_12LS()  0
+
+//#define PMD_12FS()  1  // 2 D/A outputs added. P.P. 03/19/05  bit 47
+#define PMD_12FS()  0
+
+#define CBWUSB_IO()	1  // added here. P.P. 03/09/18
+//#define CBWUSB_IO()	0  // added here. P.P. 03/09/18
+
+//#define CBWUSB_IO_2()	1  // added here. P.P. 03/09/18
+#define CBWUSB_IO_2()	0  // added here. P.P. 03/09/18
+
+//#define USB_1024LS()  1   // 2-nd usb 24-bit digital board. P.P. 11/04/07
+#define USB_1024LS()  0 //
+
+#define USB_DIO24()  1  //
+//#define USB_DIO24()  0    //
+
+//#define USB_1024LS_2()  1   // 2-nd usb 24-bit digital board. P.P. 11/04/07
+#define USB_1024LS_2()  0 //
+
+//#define USB_DIO24_2()  1  //
+#define USB_DIO24_2()  0    //
+
+//#define USB_3101()	1     // added. 05/20/07                   bit 60
+#define USB_3101()	0
+
+//#define USB_3103()	1     // added 05/20/07			   bit 61
+#define USB_3103()	0
+
+//#define USB_3106()	1     // added. P.P. 09/10/06               bit 63
+#define USB_3106()	0
+
+//#define USB_3112()      1
+#define USB_3112()      0
+
+#if CBW()                // moved here from above. P.P. 03/19/05
+
+#if PMD_16FS()
+#define CBWDEVICE_16FS 1  //
+#elif PMD_12FS()
+#define CBWDEVICE_12FS 1  //
+#elif PMD_12LS()     // one of these only is #1. P.P. 05/26/06
+#define CBWDEVICE_12LS 1  // rem - #4 below! P.P. 10/23/05
+#endif // 16FS or other boards as main board
+
+#if PMD_16FS() // then 1208 or cbw_24 usb usb - for digital outputs (and analog, if 128).
+#if PMD_12FS()
+#define CBWDEVICE_12FS 4   // brackets removed. P.P. 04/12/05
+#elif PMD_12LS()           // LS added
+#define CBWDEVICE_12LS 4   // brackets removed. P.P. 04/12/05
+#elif CBWUSB_IO()
+#define USB_IO  4    // added. P.P. 03/09/18
+#endif // pmd dio boards
+#endif // 1608FS
+
+#if (USB_1024LS()||USB_DIO24()) 
+#define CBWDEVICE_1024	5           // 2nd dio board (multipoint case)
+#elif CBWUSB_IO_2()
+#define USB_IO_2  5    // added. P.P. 03/09/18
+#endif // usb-1024 or usb-dio24
+
+#if USB_3101()	
+#define CBWDEVICE_3101     6       // Analog outputs, with some dio
+#elif USB_3103()
+#define CBWDEVICE_3103     6
+#elif USB_3106()
+#define CBWDEVICE_3106     6
+#elif USB_3112()
+#define CBWDEVICE_3112     6
+#endif // 3101
+
+#if USB_1024LS_2()||USB_DIO24_2()
+#define CBWDEVICE_1024_2	7    // 3rd dio board if more points and alarms are needed
+#endif // usb_1024LS_2
+
+#endif // cbw
+
+
+#else //not Internal case - all the code removed
+// GC311
+
+
+#endif // Internal
+
+
+//#define TOTAL_SUMMARY() 1
+#define TOTAL_SUMMARY() 0
+#if TOTAL_SUMMARY() && !TOTAL_SUMMARY()
+  #error ??
+#endif
+
+#endif // RC_INVOKED
+
+// #endif // _INTERNAL_H   // rem. P.P. 09/02/18
+
+

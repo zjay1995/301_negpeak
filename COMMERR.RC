@@ -1,0 +1,20 @@
+// from <windows.h>
+#define IE_BADID            (-1)    /* Invalid or unsupported id    */
+#define IE_OPEN             (-2)    /* Device Already Open          */
+#define IE_NOPEN            (-3)    /* Device Not Open              */
+#define IE_MEMORY           (-4)    /* Unable to allocate queues    */
+#define IE_DEFAULT          (-5)    /* Error in default parameters  */
+#define IE_HARDWARE         (-10)   /* Hardware Not Present         */
+#define IE_BYTESIZE         (-11)   /* Illegal Byte Size            */
+#define IE_BAUDRATE         (-12)   /* Unsupported BaudRate         */
+STRINGTABLE LOADONCALL MOVEABLE DISCARDABLE
+{
+ IE_BADID,    "Invalid or unsupported id"
+ IE_OPEN,     "Device Already Open"
+ IE_NOPEN,    "Device Not Open"
+ IE_MEMORY,   "Unable to allocate queues"
+ IE_DEFAULT,  "Error in default parameters"
+ IE_HARDWARE, "Hardware Not Present"
+ IE_BYTESIZE, "Illegal Byte Size"
+ IE_BAUDRATE, "Unsupported BaudRate"
+}

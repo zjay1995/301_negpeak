@@ -1,0 +1,32 @@
+; This file is maintained by HCW. Do not modify this file directly.
+
+; This help project requires hc 3.1
+[OPTIONS]
+COMPRESS=12 Hall Zeck
+ERRORLOG=wpeak501.err
+LCID=0x409 0x0 0x0 ; English (United States)
+REPORT=Yes
+CONTENTS=Contents
+TITLE=WPEAK for GC501c Help
+CNT=wpeak501.cnt
+COPYRIGHT=WPEAK Help for GC501c. Version 2.0.2.               PID Analyzers, LLC 2003
+HLP=WPEAK.hlp
+
+[FILES]
+help.rtf
+
+[MAP]
+#include <helpids.h>
+
+[CONFIG]
+; BrowseButtons()
+
+[EXCLUDE]
+301
+Stand_alone
+
+[INCLUDE]
+301           ; Variantr for GC301B
+501           ; Included for GC501 variant
+GC          ; All GC but not Stand_alone
+Stand_alone           ; Included for Stand_alone

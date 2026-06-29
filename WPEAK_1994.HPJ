@@ -1,0 +1,18 @@
+; This help project requires hc 3.1
+[OPTIONS]
+errorlog = wpeak.err
+title = Peak Works for Windows Help
+contents = Contents
+compress = 1
+oldkeyphrase = false
+warning = 3
+report = 1
+
+[FILES]
+help.rtf
+
+[CONFIG]
+; BrowseButtons()
+
+[MAP]
+#include <helpids.h>

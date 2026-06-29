@@ -1,0 +1,70 @@
+:Base wPeak.HLP 
+:Title Peak Works Help
+1 Program Overview=Overview
+2 Menues
+2 File
+3 New=CM_FILENEW
+3 Open=CM_FILEOPEN
+3 Save=CM_FILESAVE
+3 Save As=CM_FILESAVEAS
+3 PrintReport=CM_PRINTREPORT
+3 Print=CM_PRINT
+3 Printer Setup=CM_PRINTERSETUP
+3 PageSetup=CM_PAGE_SETUP
+3 Exit=CM_EXIT
+2 Edit
+3 Copy=CM_EDITCOPY
+2 View
+3 Fonts=CM_CHANGEFONT
+3 Axis=CM_AXIS_SETUP
+2 Method
+3 Edit=CM_METHODEDIT
+3 Detector A=CM_DETECTORAEDIT
+3 Detector B=CM_DETECTORBEDIT
+3 Components=CM_METHODCOMPONENTS
+3 Standards=CM_METHODSTANDARDS
+3 Download=CM_METHODDOWNLOAD
+3 Save=CM_METHODSAVE
+2 Run
+3 Calibration=CM_CALIBRATE
+3 Acquire run=CM_ACQUIRE
+3 Integrate run=CM_INTEGRATE
+3 Stop=CM_STOPINTEGRATION
+3 Save intergration results=CM_SAVEINTEGRATION
+3 Select Run=CM_SELECT_RUN
+3 Edit Run=CM_EDIT_RUN
+3 Save calibration results=CM_SAVECALRES
+3 Run modes=CM_EDIT_RUNMODE
+2 Options
+3 Preferences=CM_OPTIONS_PREFERENCES 
+2 Window
+3 Cascade=CM_CASCADECHILDREN
+3 Tile horizontal=CM_TILECHILDREN
+3 Tile vertical=CM_TILECHILDREN
+3 Arrange Icons=CM_ARRANGEICONS
+3 Close All=CM_CLOSECHILDREN
+3 Graph A=CM_WINDOW_GRAPH_A
+3 Graph B=CM_WINDOW_GRAPH_B
+3 Table A=CM_WINDOW_PEAK_A
+3 Table B=CM_WINDOW_PEAK_B
+2 Help
+3 Contents=CM_HELPCONTENTS
+3 Using Help=CM_HELPONHELP
+3 About=CM_ABOUT
+1 Toolbar
+2 Toolbar=Toolbar
+1 Dialog Boxes
+2 About Dialog Box=ID_ABOUTDIALOG
+2 Page Setup Dialog Box=ID_PAGESETUPDIALOG
+2 Preferences Dialog Box=ID_PREFERENCESDIALOG
+2 Save Options Dialog Box=ID_SAVEOPTIONSDIALOG
+2 Method Dialog Box=ID_METHODDIALOG
+2 Detector Dialog Box=ID_DETECTORDIALOG
+2 Components Dialog Box=ID_COMPONENTSDIALOG
+2 Edit Component Dialog Box=ID_EDITCOMPONENTDIALOG
+2 Standards Dialog Box=ID_STANDARDSDIALOG
+2 Edit Standard Dialog Box=ID_EDITSTANDARDDIALOG
+2 Select Run Dialog Box=ID_RUNLISTDIALOG
+2 Edit Run Comment Dialog Box=ID_RUNDIALOG
+2 Run Modes Dialog Box=ID_RUNMODEDIALOG
+

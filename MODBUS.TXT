@@ -1,0 +1,47 @@
+1. wPeak Preferences dialog has "ModBus" control to set desired COM port for ModBus slave
+2. wPeak use only MODBUS Message ASCII Framing.
+3. wPeak implements only one function - (0x04) Read Input Registers.
+wPeak returns  Folating point 32bit values as a pair of 16bit values. 
+High 16bit part of FP value in one register ande Low 16bit part of FP value in the next register.
+
+Available addresses is started from 0
+
+wPeak returns following arrays:
+
+#define POINTS()       5       // may be changed!
+#define NUMDETECTORS   2
+#define COMPONENT_ROWS 30
+
+float TWA_results[POINTS()][NUMDETECTORS][COMPONENT_ROWS];  //  array 0
+float max_TWA_conc[POINTS()][NUMDETECTORS][COMPONENT_ROWS]; //  array 1 
+float min_TWA_conc[POINTS()][NUMDETECTORS][COMPONENT_ROWS]; //  array 2
+float concen_point[POINTS()][NUMDETECTORS][COMPONENT_ROWS]; //  array 3
+
+
+float TWA_total[POINTS()][NUMDETECTORS];  	//  array 4
+float max_TWA_total[POINTS()][NUMDETECTORS];    //  array 5
+float min_TWA_total[POINTS()][NUMDETECTORS];    //  array 6
+float total_point[POINTS()][NUMDETECTORS];      //  array 7
+
+
+For example:
+
+if We want to get value of min_TWA_conc[i][j][k]
+We should query values for following registers:
+
+addr = (POINTS()*NUMDETECTORS*COMPONENT_ROWS) * 2 +        // skip TWA_results and max_TWA_conc
+     + i*NUMDETECTORS*COMPONENT_ROWS + j*COMPONENT_ROWS + k
+
+addr*2   - for High part of Floatign Point value
+addr*2+1 - for Low part of Floatign Point value
+
+16bit values is returned in the answer message as a pair of bytes (High byte goes first)
+
+
+if We want to get value of total_point[i][j]
+We should query values for following registers:
+
+addr = (POINTS()*NUMDETECTORS*COMPONENT_ROWS) * 4 +  // skip 4 big arrays 
+     + (POINTS()*NUMDETECTORS) * 3 +                 // skip TWA_total max_TWA_total and min_TWA_total
+     + i*NUMDETECTORS + j
+

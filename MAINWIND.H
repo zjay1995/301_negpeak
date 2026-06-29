@@ -1,0 +1,330 @@
+#ifndef  _MAINWIND_H
+#define  _MAINWIND_H
+
+#ifndef  _FRAME_H
+#include "frame.h"
+#endif
+#ifndef  _ID_H
+#include "id.h"
+#endif
+#ifndef  _METHOD_H
+#include "method.h"	// NUMDETECTORS
+#endif
+
+#ifndef  _WCPPLIB_DEFS_H
+#include "wcpplib\defs.h"
+#endif
+class WCPPLIB_CLASS iwstream;
+class WCPPLIB_CLASS owstream;
+class WCPPLIB_CLASS Str;
+
+class Job;
+class Run;
+class PeakList;
+class Integration;
+
+class OutputWindow;
+class PictInfo;
+class RunPictInfo;
+
+class Comm;
+class CalResults;
+
+#ifndef  _PREF_H
+#include "pref.h"
+#endif
+
+
+
+#include "internal.h" // define INTERNAL and so on
+
+#if MODBUS()
+#include "modbus.h"
+#endif
+
+
+
+#if !INTERNAL()
+  #define DEVICE_NAME "GC311 Gas Chromatograph"
+#elif GC501()
+//  #define DEVICE_NAME "GC501B Process Gas Chromatograph"
+  #define DEVICE_NAME "GC501c Process Gas Chromatograph"  // P.P. 04/02/06
+#elif GC321()&&STAND_ALONE()    // 07/17/08
+  #define DEVICE_NAME "Wpeak Integrator"
+#elif GC321()
+//  #define DEVICE_NAME "GC321 Gas Chromatograph"
+  #define DEVICE_NAME "GC322 Gas Chromatograph" // changed - next model. P.P. 07/02/06
+#elif GC326()
+  #define DEVICE_NAME "GC326 Gas Chromatograph" // changed - next model. P.P. 07/02/06
+#elif STAND_ALONE()
+  #define DEVICE_NAME "Wpeak Integrator"
+#elif GC312()
+  #define DEVICE_NAME "GC312 Gas Chromatograph"          // added. P.P. 04/02/06
+#elif !OPTICS()
+//  #define DEVICE_NAME "GC301B Process Gas Chromatograph"
+  #define DEVICE_NAME "GC301c Process Gas Chromatograph"   // P.P. 04/02/06
+#else
+  #define DEVICE_NAME "Optic Chromatograph" //??
+#endif
+
+
+#if OPTICS()
+  #define APP_NAME "Optics Works"
+#else
+  #define APP_NAME "Peak Works"
+#endif
+
+
+
+
+#include "winlib\wtimer.h"
+
+class MainWindow : public FrameWindow {
+  typedef FrameWindow Inherited;
+  BOOL bF1Pressed;
+// added to use one button as 2. P.P. 07/01/06
+  BOOL bOvenOn;
+  BOOL bLampOn;
+  BOOL bDoorOn;
+// end, P.P. 07/01/06
+  BOOL bAutoZero; // added. P.P. 08/28/09 here 12/04/09
+  BOOL bAutoZeroB; // added. P.P. 07/14/17 
+//  BOOL bFan; // added P.P. 02/23/10
+ public:
+  BOOL bHeat;  // moved here. P.P. 05/02/13
+  BOOL bSample;  // P.P. 03/14/17
+  BOOL bEquilibrate;  // P.P. 03/14/17
+  BOOL bInject;  // P.P. 03/14/17
+  BOOL bDesorb;  // P.P. 03/14/17
+  BOOL bPurge;  // P.P. 03/16/17
+  BOOL bFan; // moved to public. P.P. 03/18/17
+  BOOL bInj_V4;  // P.P. 03/18/17
+  BOOL bLineHeat; // P.P. 03/28/17
+  BOOL bFlowLow; // P.P. 05/13/18
+  BOOL bHeatInj; // added. P.P. 12/12/18
+  Preferences &Pref;
+
+  MainWindow(LPSTR ATitle, int MenuId, LPSTR HelpFile, Preferences &_Pref, PTModule AModule = NULL);
+  virtual ~MainWindow();
+
+  virtual void SetupWindow();
+  virtual void WMDestroy(RTMessage) = [WM_FIRST + WM_DESTROY];
+  virtual BOOL CanClose();
+
+  virtual LPSTR GetClassName();
+  virtual void GetWindowClass(WNDCLASS &AWndClass);
+
+  virtual void ActivationResponse(WORD Activated,  BOOL IsIconified);
+
+  virtual void WMInitMenuPopup(RTMessage) = [WM_FIRST + WM_INITMENUPOPUP];
+  virtual int  GetMainMenuString(UINT id);
+
+  virtual void DefWndProc(RTMessage Msg);
+
+  virtual void WMTimer(RTMessage) = [WM_FIRST + WM_TIMER];
+  virtual void WMCommNotify(RTMessage) = [WM_FIRST + WM_COMMNOTIFY];
+  virtual void WMIdle(RTMessage) = [WM_FIRST + WM_IDLE];
+  virtual void WMEnterIdle(RTMessage) = [WM_FIRST + WM_ENTERIDLE];
+  virtual void WMCommand(RTMessage) = [WM_FIRST + WM_COMMAND];
+
+  virtual void WMGetJob(RTMessage) = [WM_FIRST + WM_GET_JOB];
+  virtual void WMGetRun(RTMessage) = [WM_FIRST + WM_GET_RUN];
+  virtual void WMGetPeakList(RTMessage) = [WM_FIRST + WM_GET_PEAKLIST];
+  virtual void WMGetPictInfo(RTMessage) = [WM_FIRST + WM_GET_PICTINFO];
+  virtual void WMGetRunPictInfo(RTMessage) = [WM_FIRST + WM_GET_RUNPICTINFO];
+  virtual void WMGetOutput(RTMessage) = [WM_FIRST + WM_GET_OUTPUT];
+
+  virtual void CMIntegrate(RTMessage) = [CM_FIRST + CM_INTEGRATE];
+  virtual void CMStopPump(RTMessage) = [CM_FIRST + CM_STOPPUMP];
+  virtual void CMStopAlarm(RTMessage) = [CM_FIRST + CM_STOPALARM];
+  virtual void CMStartTCD(RTMessage) = [CM_FIRST + CM_STARTTCDDETECTOR];
+  virtual void CMStopTCD(RTMessage) = [CM_FIRST + CM_STOPTCDDETECTOR];
+  virtual void CMStartFlame(RTMessage) = [CM_FIRST + CM_STARTFLAMEDETECTOR]; // P.P. 06/28/05
+  virtual void CMStopFlame(RTMessage) = [CM_FIRST + CM_STOPFLAMEDETECTOR];   //
+  virtual void CMStartLamp(RTMessage) = [CM_FIRST + CM_STARTLAMP];   // 2 lines added. P.P. 06/21/06
+  virtual void CMStopLamp(RTMessage) = [CM_FIRST + CM_STOPLAMP];     //
+  virtual void CMStartLampB(RTMessage) = [CM_FIRST + CM_STARTLAMPB]; // 2 lines added. P.P. 06/21/06
+  virtual void CMStopLampB(RTMessage) = [CM_FIRST + CM_STOPLAMPB];   //
+  virtual void CMEnableOven(RTMessage) = [CM_FIRST + CM_ENABLEOVEN];   // P.P. 06/30/06
+  virtual void CMDisableOven(RTMessage) = [CM_FIRST + CM_DISABLEOVEN]; // P.P. 06/30/06
+  virtual void CMOpenDoor(RTMessage) = [CM_FIRST + CM_OPENDOOR]; // P.P. 07/01/06
+  virtual void CMCloseDoor(RTMessage) = [CM_FIRST + CM_CLOSEDOOR]; // P.P. 07/01/06
+  virtual void CMAutoZero(RTMessage) = [CM_FIRST + CM_AUTOZERO]; // P.P. 08/28/09  // here 12/04/09
+  virtual void CMAutoZ_Of(RTMessage) = [CM_FIRST + CM_AUTOZ_OF]; // P.P. 08/28/09
+  virtual void CMAutoZ_B(RTMessage) = [CM_FIRST + CM_AUTOZ_B]; // P.P. 07/14/17  
+  virtual void CMAutoZ_B_OFF(RTMessage) = [CM_FIRST + CM_AUTOZ_B_OFF]; // P.P. 07/14/17
+//  virtual void CMZoom_In(RTMessage) = [CM_FIRST + CM_ZOOM_IN]; // P.P. 12/04/09  and rem - we do not need this here
+//  virtual void CMZoom_Out(RTMessage) = [CM_FIRST + CM_ZOOM_OUT]; // P.P. 12/04/09
+
+
+  static BOOL OpenSaveDialog(HWND hwnd, const char *title, const char *filter, Str *FileName, BOOL fSave, int *nIndex=0);
+  BOOL GetJobFileName(HWND hwnd, Str *FileName, BOOL fSave);
+  int FileOpen(const char *meth_name);
+  void SaveWindow();
+
+  virtual void CMAutoexec(RTMessage) = [CM_FIRST + CM_AUTOEXEC];
+
+  virtual void CMFileNew(RTMessage) = [CM_FIRST + CM_FILENEW];
+  virtual void CMFileOpen(RTMessage) = [CM_FIRST + CM_FILEOPEN];
+  virtual void CMFileSave(RTMessage) = [CM_FIRST + CM_FILESAVE];
+  virtual void CMFileSaveAs(RTMessage) = [CM_FIRST + CM_FILESAVEAS];
+
+  virtual void CMFileDelete(RTMessage) = [CM_FIRST + CM_FILEDELETE ];
+
+  virtual void CMSaveReport(RTMessage) = [CM_FIRST + CM_SAVEREPORT];
+  virtual void CMPrintReport(RTMessage) = [CM_FIRST + CM_PRINTREPORT];
+  virtual void CMPrinterSetup(RTMessage) = [CM_FIRST + CM_PRINTERSETUP];
+  virtual void CMPageSetup(RTMessage) = [CM_FIRST + CM_PAGE_SETUP];
+
+  virtual void CMMethodEdit(RTMessage) = [CM_FIRST + CM_METHODEDIT];
+  virtual void CMMethodComponents(RTMessage) = [CM_FIRST + CM_METHODCOMPONENTS];
+  virtual void CMMethodStandards(RTMessage) = [CM_FIRST + CM_METHODSTANDARDS];
+  virtual void CMDetectorAEdit(RTMessage) = [CM_FIRST + CM_DETECTORAEDIT];
+  virtual void CMDetectorBEdit(RTMessage) = [CM_FIRST + CM_DETECTORBEDIT];
+  virtual void CMMethodDownload(RTMessage) = [CM_FIRST + CM_METHODDOWNLOAD];
+  virtual void CMMethodSave(RTMessage) = [CM_FIRST + CM_METHODSAVE];
+
+  virtual void CMAcquire(RTMessage) = [CM_FIRST + CM_ACQUIRE];
+  virtual void CMAcquire1(RTMessage) = [CM_FIRST + CM_ACQUIRE1];
+  virtual void CMCalibrate(RTMessage) = [CM_FIRST + CM_CALIBRATE];
+  virtual void CMCalibrate1(RTMessage) = [CM_FIRST + CM_CALIBRATE1];
+  virtual void CMCheckCalibrate(RTMessage) = [CM_FIRST + CM_CHECKCALIBRATE];
+  virtual void CMCheckCalibrate1(RTMessage) = [CM_FIRST + CM_CHECKCALIBRATE1];
+  virtual void CMStopIntegration(RTMessage) = [CM_FIRST + CM_STOPINTEGRATION];
+  virtual void CMSaveIntegration(RTMessage) = [CM_FIRST + CM_SAVEINTEGRATION];
+  virtual void CMSelectRun(RTMessage) = [CM_FIRST + CM_SELECT_RUN];
+  virtual void CMEditRun(RTMessage) = [CM_FIRST + CM_EDIT_RUN];
+  virtual void CMSaveCalRes(RTMessage) = [CM_FIRST + CM_SAVECALRES];
+
+  virtual void CMEditRunMode(RTMessage) = [CM_FIRST + CM_EDIT_RUNMODE];
+  virtual void CMEditShiftMode(RTMessage) = [CM_FIRST + CM_EDIT_SHIFTMODE];
+  virtual void CMEditFlowMode(RTMessage) = [CM_FIRST + CM_EDIT_FLOWMODE]; // added. P.P. 12/31/03
+  #ifdef FILTER
+  virtual void CMApplyFilter(RTMessage) = [CM_FIRST + CM_APPLYFILTER];
+  #endif//FILTER
+
+  virtual void CMOptionsPreferences(RTMessage) = [CM_FIRST + CM_OPTIONS_PREFERENCES];
+  virtual void CMOptionsSave(RTMessage) = [CM_FIRST + CM_OPTIONS_SAVE];
+
+  virtual void CMWindowSummaryA(RTMessage) = [CM_FIRST + CM_WINDOW_SUMMARY_A ];
+  virtual void CMWindowSummaryB(RTMessage) = [CM_FIRST + CM_WINDOW_SUMMARY_B ];
+  virtual void CMWindowPeakA(RTMessage) = [CM_FIRST + CM_WINDOW_PEAK_A ];
+  virtual void CMWindowPeakB(RTMessage) = [CM_FIRST + CM_WINDOW_PEAK_B ];
+  virtual void CMWindowGraphAll(RTMessage) = [CM_FIRST + CM_WINDOW_GRAPH_ALL ];
+  virtual void CMWindowGraphA(RTMessage) = [CM_FIRST + CM_WINDOW_GRAPH_A ];
+  virtual void CMWindowGraphB(RTMessage) = [CM_FIRST + CM_WINDOW_GRAPH_B ];
+  virtual void CMWindowRunGraph(RTMessage) = [CM_FIRST + CM_WINDOW_RUN_GRAPH ];
+  virtual void CMWindowOutput (RTMessage) = [CM_FIRST + CM_WINDOW_OUTPUT];
+
+  virtual void CMHelpContents(RTMessage) = [CM_FIRST + CM_HELPCONTENTS];
+  virtual void CMHelpOnHelp(RTMessage) = [CM_FIRST + CM_HELPONHELP];
+  virtual void CMAbout(RTMessage) = [CM_FIRST + CM_ABOUT];
+
+  virtual void SaveDesktopInfo(Ropstream os);
+  virtual void RestoreDesktopInfo(Ripstream is);
+
+
+  void MakeSummaryWindow(int i);
+  void DeleteSummaryWindow(int i);
+  void MakePeakWindow(int i);
+  void DeletePeakWindow(int i);
+  void MakeGraphWindow(int i);
+  void DeleteGraphWindow(int i);
+  void MakeRunGraphWindow(void);
+  void DeleteRunGraphWindow(void);
+  void MakeOutputWindow(void);
+  void DeleteOutputWindow(void);
+
+  PTWindowsObject FindSummaryWindow(int i) { return FindChild("SummaryWindow",i); }
+  PTWindowsObject FindPeakWindow(int i) { return FindChild("PeakWindow",i); }
+  PTWindowsObject FindGraphWindow(int i) { return FindChild("GraphWindow",i); }
+  PTWindowsObject FindRunGraphWindow(void) { return FindChild("RunGraphWindow"); }
+  PTWindowsObject FindOutputWindow(void)  { return FindChild("OutputWindow"); }
+
+  Job *pJob;
+  void ReflectJob(void);
+  void NewJob(void);
+  void DeleteJob(void);
+
+  int LoadJob(iwstream &is);
+  int SaveJob(owstream &os);
+
+  Run *pRun;
+  void ReflectRun(void);
+  void NewRun(void);
+  void NewRun(int iRun);
+  void DeleteRun(void);
+  void SaveRun(void);
+
+  void __DeleteRun(void);
+
+  RunPictInfo *pRunPictInfo;
+  PictInfo *pPictInfo[NUMDETECTORS+1]; // the last is ALL graphs Window!!
+  PeakList *pPeakList[NUMDETECTORS];	// array[ 0:NUMDETECTORS-1]
+  void DeletePeakList(void);
+  void ReflectPeakList(void);
+
+  Integration *pIntegration;
+  void DeleteIntegration();
+  void ReflectIntegration();
+  void ProcessIntegration();
+
+
+  void Refresh(int bGraphOnly=0);
+  void ChangePeakName(const char *name);
+
+  void AcquireFunc(int acquire_type, BOOL bAuto);
+
+  OutputWindow *GetOutputWindow();
+  void print(UINT fmtID, ... );
+  void print(LPCSTR fmt, ... );
+
+  const char far *GetDesktopName();
+
+  Comm *GetComm();
+  void ClearComm();
+  #if !_NOCOMM()
+  Comm *pComm;
+  #endif
+  #if MODBUS()
+  ModBusServer *modBus;
+  void StartModBus();
+  void StopModBus();
+  #endif
+//#if GC321()
+#if GC321()||GC326() // P.P. 12/07/18
+  void ReflectOvenDoor(); // added. P.P. 07/01/06
+#endif
+  #if INTERNAL()
+  WTimer *wtimer;
+  #endif
+
+  CalResults *pTempCalResults; // temporary variable (960 byte) for avoiding allocate in stack
+
+  void ReflectHeat(BOOL bHeat); // added. P.P. 05/02/13  here 10/24/14
+  void ReflectSample(BOOL bSample); // added. P.P. 03/14/17
+  void ReflectEquilibrate(BOOL bEquilibrate); // added. P.P. 03/14/17  
+  void ReflectInject(BOOL bInject); // added. P.P. 03/14/17  
+  void ReflectDesorb(BOOL bDesorb); // added. P.P. 03/14/17  
+  void ReflectPurge(BOOL bPurge); // added. P.P. 03/18/17
+  void ReflectFan(BOOL bFan); // added. P.P. 03/18/17
+  void ReflectInj_V4(BOOL bInj_V4); // added. P.P. 03/18/17
+  void ReflectLineHeat(BOOL bLineHeat); // P.P. 03/28/17
+  void MainWindow::ReflectFlow(BOOL bFlowLow); // P.P. 05/13/18
+  void ReflectHeatInj(BOOL bHeatInj); // added. P.P. 12/12/18 
+
+  int cur_point;
+ private:
+  operator=(const MainWindow &);
+};
+
+
+#endif
+
+
+
+
+
+
+
+

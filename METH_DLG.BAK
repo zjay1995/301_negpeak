@@ -1,0 +1,1190 @@
+#include "includes.h"
+#pragma hdrstop                     
+
+#ifndef  _WINUTIL_WUTIL_H
+#include "winutil\wutil.h"
+#endif
+#ifndef  _WINUTIL_DLG_ITEM_H
+#include "winutil\dlg_item.h"
+#endif
+
+#ifndef  _ID_H
+#include "id.h"
+#endif
+
+#ifndef  _TD_PLUS_H
+#include "td_plus.h"
+#endif
+
+#ifndef  _METHOD_H
+#include "method.h"
+#endif
+#include "internal.h" // INTERNAL()
+
+//#define FIELDOFFSET(type, field)    ((int)(&((type NEAR*)1)->field)-1)
+
+static ControlInfo far PointsAndAlarmsControlInfo[]={
+  { citONOFF,   IDD_ALARMS,             FIELDOFFSET(Method,method_table.alarms_on_off), },
+  { citNULL }   // End of array marker
+};
+
+#ifndef  _PREF_H
+#include "pref.h"
+#endif
+
+class PointsAndAlarmsDlg : public TransferPlusDlg {
+  typedef TransferPlusDlg Inherited;
+ public:
+   PointsAndAlarmsDlg(PTWindowsObject AParent, int ResourceId, Method *pMethod, Preferences &_Pref, PTModule AModule = NULL)
+    : TransferPlusDlg(AParent, ResourceId, pMethod, PointsAndAlarmsControlInfo, AModule), Pref(_Pref) {}
+ protected:
+  Preferences &Pref;
+  virtual void SetupWindow()
+  {
+    Inherited::SetupWindow();
+    Centralize(this);
+  }
+  virtual void SetupControls(void *data);
+  virtual void AcceptControls(void *data);
+
+  virtual void Alarms(RTMessage Msg) = [ID_FIRST + IDD_ALARMS]
+  {
+    ReflectAlarms();
+  }
+  void ReflectAlarms();
+  virtual void WMCommand(RTMessage Msg) = [WM_FIRST + WM_COMMAND]
+  {
+    if(IDD_POINTS<Msg.WParam && Msg.WParam<=IDD_POINTS+MAX_POINTS) {
+      ReflectAlarms();
+    }
+    Inherited::WMCommand(Msg);
+  }
+  virtual void PointsAlarms(RTMessage Msg) = [ID_FIRST + IDD_POINTS_ALARMS]
+  {
+  }
+// added P.P. 12/22/10
+  virtual void PointsAll(RTMessage Msg) = [ID_FIRST + IDD_POINTS_ALL]
+  {
+    for(int id=IDD_POINT1; id<=IDD_POINTS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_POINTS));
+      if(!b1) {
+        CheckDlgButton(HWindow, id, 1);
+      }
+    }
+    ReflectAlarms();
+  }
+
+  virtual void PointsClear(RTMessage Msg) = [ID_FIRST + IDD_POINTS_CLEAR]
+  {
+    for(int id=IDD_POINT1; id<=IDD_POINTS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_POINTS));
+      if(b1) {
+        CheckDlgButton(HWindow, id, 0);
+      }
+    }
+    ReflectAlarms();
+  }
+
+  virtual void LowAlarmsAll(RTMessage Msg) = [ID_FIRST + IDD_LA_ALL]
+  {
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(int id=IDD_LA1; id<=IDD_LOW_ALARMS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_LOW_ALARMS+(id-IDD_LOW_ALARMS));
+      if(!b1) {
+        CheckDlgButton(HWindow, id, 1);
+      }
+    }
+#endif
+  }
+  virtual void LowAlarmsClear(RTMessage Msg) = [ID_FIRST + IDD_LA_CLEAR]
+  {
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(int id=IDD_LA1; id<=IDD_LOW_ALARMS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_LOW_ALARMS+(id-IDD_LOW_ALARMS));
+      if(b1) {
+        CheckDlgButton(HWindow, id, 0);
+      }
+    }
+#endif
+  }
+  virtual void HighAlarmsAll(RTMessage Msg) = [ID_FIRST + IDD_HA_ALL]
+  {
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(int id=IDD_HA1; id<=IDD_HIGH_ALARMS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_HIGH_ALARMS+(id-IDD_HIGH_ALARMS));
+      if(!b1) {
+        CheckDlgButton(HWindow, id, 1);
+      }
+    }
+#endif
+  }
+  virtual void HighAlarmsClear(RTMessage Msg) = [ID_FIRST + IDD_HA_CLEAR]
+  {
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(int id=IDD_HA1; id<=IDD_HIGH_ALARMS+POINTS(); id++) {
+      int b1=IsDlgButtonChecked(HWindow,IDD_HIGH_ALARMS+(id-IDD_HIGH_ALARMS));
+      if(b1) {
+        CheckDlgButton(HWindow, id, 0);
+      }
+    }
+#endif
+  }
+// end of new functions. P.P. 12/22/10
+};
+
+
+#include "internal.h" // INTERNAL()
+void PointsAndAlarmsDlg::SetupControls(void *data)
+{
+  Inherited::SetupControls(data);
+
+  const Method *pMethod=(Method *)data;
+  {
+    #if POINTS()<2
+    ulong points=1; // always 1 point
+    #else
+    const ulong &points=pMethod->method_table.points;
+    #endif
+    int id=IDD_POINT1;
+    for(ulong m=1; id<=IDD_POINTS+POINTS(); id++, m<<=1) {
+      CheckDlgButton(HWindow,id, (points&m)?1:0);
+    }
+    for(; id<=IDD_POINTS+MAX_POINTS; id++) {
+      ShowWindow(GetDlgItem(HWindow,id),SW_HIDE);
+    }
+  }
+  {
+    const ulong &lalarms=pMethod->method_table.lalarms;
+    int id=IDD_LA1;
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(ulong m=1; id<=IDD_LOW_ALARMS+POINTS(); id++, m<<=1) {
+      CheckDlgButton(HWindow,id, (lalarms&m)?1:0);
+    }
+#else
+    for(ulong m=1; id<=IDD_LOW_ALARMS+POINTS(); id++, m<<=1) {
+      ShowWindow(GetDlgItem(HWindow,id),SW_HIDE);
+    }
+#endif
+    for(; id<=IDD_LOW_ALARMS+MAX_POINTS; id++) {
+      ShowWindow(GetDlgItem(HWindow,id),SW_HIDE);
+    }
+  }
+  {
+    const ulong &halarms=pMethod->method_table.halarms;
+    int id=IDD_HA1;
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+    for(ulong m=1; id<=IDD_HIGH_ALARMS+POINTS(); id++, m<<=1) {
+      CheckDlgButton(HWindow,id, (halarms&m)?1:0);
+    }
+#else
+    for(ulong m=1; id<=IDD_HIGH_ALARMS+POINTS(); id++, m<<=1) {
+      ShowWindow(GetDlgItem(HWindow,id),SW_HIDE);
+    }
+#endif
+    for(; id<=IDD_HIGH_ALARMS+MAX_POINTS; id++) {
+      ShowWindow(GetDlgItem(HWindow,id),SW_HIDE);
+    }
+  }
+  #if POINTS()<2
+  {
+    ShowWindow(GetDlgItem(HWindow,IDD_POINT1),SW_HIDE);
+    ShowWindow(GetDlgItem(HWindow,IDD_LA1), SW_SHOW);
+    ShowWindow(GetDlgItem(HWindow,IDD_HA1), SW_SHOW);
+
+    ShowWindow(GetDlgItem(HWindow,IDD_POINTS),SW_HIDE);
+    ShowWindow(GetDlgItem(HWindow,IDD_LOW_ALARMS),SW_HIDE);
+    ShowWindow(GetDlgItem(HWindow,IDD_HIGH_ALARMS),SW_HIDE);
+
+    SetDlgItemText(HWindow,IDD_LA1,GetDlgItemText(HWindow, IDD_LOW_ALARMS));
+    SetDlgItemText(HWindow,IDD_HA1,GetDlgItemText(HWindow, IDD_HIGH_ALARMS));
+
+    RECT rc;
+    GetWindowRect(GetDlgItem(HWindow,IDD_LA1),&rc);
+    int height=rc.bottom-rc.top;
+    GetWindowRect(GetDlgItem(HWindow,IDD_LOW_ALARMS),&rc);
+    MapWindowPoints(0, HWindow,(LPPOINT)&rc,2);
+    SetWindowPos(GetDlgItem(HWindow,IDD_LA1), 0, rc.left, rc.top, rc.right-rc.left, height, SWP_NOACTIVATE|SWP_NOZORDER);
+    GetWindowRect(GetDlgItem(HWindow,IDD_HIGH_ALARMS),&rc);
+    MapWindowPoints(0, HWindow,(LPPOINT)&rc,2);
+    SetWindowPos(GetDlgItem(HWindow,IDD_HA1), 0, rc.left, rc.top, rc.right-rc.left, height, SWP_NOACTIVATE|SWP_NOZORDER);
+  }
+  #endif
+  ReflectAlarms();
+}
+
+void PointsAndAlarmsDlg::AcceptControls(void *data)
+{
+  Inherited::AcceptControls(data);
+  Method *pMethod=(Method *)data;
+  {
+    ulong &points=pMethod->method_table.points;
+    points=0;
+    int id=IDD_POINT1;
+    for(ulong m=1; id<=IDD_POINTS+POINTS(); id++, m<<=1) {
+      if(IsDlgButtonChecked(HWindow,id)) points|=m;
+    }
+    if(!points) points=1; // set first bit
+  }
+  {
+    ulong &lalarms=pMethod->method_table.lalarms;
+    lalarms=0;
+    int id=IDD_LA1;
+    for(ulong m=1; id<=IDD_LOW_ALARMS+POINTS(); id++, m<<=1) {
+      if(IsDlgButtonChecked(HWindow,id)) lalarms|=m;
+    }
+  }
+  {
+    ulong &halarms=pMethod->method_table.halarms;
+    halarms=0;
+    int id=IDD_HA1;
+    for(ulong m=1; id<=IDD_HIGH_ALARMS+POINTS(); id++, m<<=1) {
+      if(IsDlgButtonChecked(HWindow,id)) halarms|=m;
+    }
+  }
+}
+
+void PointsAndAlarmsDlg::ReflectAlarms()
+{
+#if !NO_ALARMS()  // cond. added. P.P. 05/03/11
+  int b=IsDlgButtonChecked(HWindow, IDD_ALARMS);
+#else
+  int b = 0; // added. P.P. 05/03/11
+#endif
+  {
+    EnableWindow(GetDlgItem(HWindow,IDD_LOW_ALARMS),b);
+    for(int id=IDD_LA1; id<=IDD_LOW_ALARMS+POINTS(); id++) {
+      int b1=b&&IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_LOW_ALARMS));
+      EnableWindow(GetDlgItem(HWindow,id),b1);
+    }
+  }
+  {
+    EnableWindow(GetDlgItem(HWindow,IDD_HIGH_ALARMS),b);
+    for(int id=IDD_HA1; id<=IDD_HIGH_ALARMS+POINTS(); id++) {
+      int b1=b&&IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_HIGH_ALARMS));
+      EnableWindow(GetDlgItem(HWindow,id),b1);
+    }
+  }
+}
+// new functions added. P.P. 12/22/10
+/* //void PointsAndAlarmsDlg::PointsAll(RTMessage Msg) = [ID_FIRST + IDD_POINTS_ALL]
+void PointsAll(RTMessage Msg) = [ID_FIRST + IDD_POINTS_ALL]
+{
+  for(int id=IDD_POINT1; id<=IDD_POINTS+POINTS(); id++) {
+    int b1=IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_POINTS));
+    if(!b1) {
+      CheckDlgButton((HWindow, id, 1);
+    }
+  }
+}
+*/// end of new functions. P.P. 12/22/10
+
+/* ----------------------------------------------------------------- */
+
+static ControlInfo far MethodTableControlInfo[]={
+//#if GC321() // P.P. 06/10/06
+#if GC321()||GC326() // P.P. 12/08/18
+  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,300},  // P.P. 08/03/12
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,275},  // 10/09/08
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,250}, // 03/21/08 restored P.P. 06/18/10
+#else
+  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,250},  // P.P. 07/22/18
+#endif // only in GC322 oven not = inj/det, but still define, just in case. P.P. 07/22/18
+#if CONCENTRATOR()
+  { citTEMP,    IDD_DESORB_TEMP,        FIELDOFFSET(Method,method_table.desorb_temp),0,330},  // P.P. 07/16/18
+#endif // conc
+#if FID()
+  { citTEMP,    IDD_FID_TEMP,        FIELDOFFSET(Method,method_table.fid_temp),0,300},  // P.P. 07/16/18
+#endif
+/* // rem P.P. 07/22/18
+#else
+#if CONCENTRATOR() // on cond now. P.P. 02/20/10
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,275},  // P.P. 02/20/10
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,325},  // increased. P.P. 03/15/10
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,330},  //  P.P. 03/18/10 restored 01/26/18, 300->330 01/30/18
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,350},  //  P.P. 02/09/18
+  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,330},  //  P.P. 03/07/18 // for Argentina
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,270},  //  P.P. 12/01/17
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,250},  //  P.P. 12/07/17
+//  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,220},  //  P.P. 12/25/17
+#elif FID()
+  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,300},  //  P.P. 03/18/10
+#else
+  { citTEMP,    IDD_INJDET_TEMP,        FIELDOFFSET(Method,method_table.inj_det_temp),0,250},
+#endif // concentrator
+#endif // gc321
+*/
+#if GC312() // P.P. 04/10/06
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,125},
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,200}, // new for GC312. P.P. 09/16/09
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,150}, // P.P. 11/12/10
+  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,100}, // P.P. 03/03/17
+//#elif GC321() // P.P. 06/10/06
+#elif GC321()||GC326() // P.P. 12/08/18
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,275},  // 10/09/08
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,250},  // P.P. 06/18/10
+  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,300},  // P.P. 12/08/18
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,150}, // 03/21/08
+#else // regular case - 301 or 501
+  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,200},   // P.P. 12/30/09
+//  { citTEMP,    IDD_OVEN_TEMP,          FIELDOFFSET(Method,method_table.oven_temp),0,150}, // 03/21/08
+#endif // gc312
+//  { citTEMP,    IDD_DESORB_TEMP,        FIELDOFFSET(Method,method_table.desorb_temp),0,450}, // added 02/11/06. P.P. Rem 02/20/06 
+//  { citTIME,    IDD_ANALYSIS_TIME,      FIELDOFFSET(Method,method_table.analysis_time), 1 , 23*60},
+// longer analysis time. P.P. 11/06/02
+  { citTIME,    IDD_ANALYSIS_TIME,      FIELDOFFSET(Method,method_table.analysis_time), 1 , 120*60},
+//  { citTIME,    IDD_SAMPLE_TIME,        FIELDOFFSET(Method,method_table.sample_time), 1 , 2*60  },
+  { citTIME,    IDD_SAMPLE_TIME,        FIELDOFFSET(Method,method_table.sample_time), 1 , 15*60  },
+#if !TIME_MULT() // regular case. Now on cond. 03/16/08
+//  { citTIME,    IDD_INJECT_TIME,        FIELDOFFSET(Method,method_table.inject_time), 1 , 5*60+39       },
+  { citTIME,    IDD_INJECT_TIME,        FIELDOFFSET(Method,method_table.inject_time), 1 , 15*60       }, // increased. P.P. 11/12/10
+#else
+  { citTIME,    IDD_INJECT_TIME,        FIELDOFFSET(Method,method_table.inject_time), 1 , 50*60       }, // testing time <1s. 03/11/08
+//  { citTIME,    IDD_INJECT_TIME,        FIELDOFFSET(Method,method_table.inject_time), 0.01 , 50*60       }, // testing time <1s. 03/11/08
+#endif // mult_time
+// 2 lines added for 501c. Purge time - for use as next point sampling ahead. P.P. 12/19/02
+//  { citTIME,    IDD_CALIBRATE_TIME,     FIELDOFFSET(Method,method_table.calibrate_time), 1 , 23*60},
+  { citTIME,    IDD_CALIBRATE_TIME,     FIELDOFFSET(Method,method_table.calibrate_time), 1 , 120*60},
+#if CONCENTRATOR() // added. P.P. 02/18/10
+  { citTIME,    IDD_EQUILIBRATE_TIME,   FIELDOFFSET(Method,method_table.equilibrate_time), 0 , 5*60+39}, // same as inject. P.P. 02/18/10
+#else
+  { citTIME,    IDD_EQUILIBRATE_TIME,   FIELDOFFSET(Method,method_table.equilibrate_time), 1 , 60},
+#endif // concentrator
+//  { citTIME,    IDD_PURGE_TIME,         FIELDOFFSET(Method,method_table.purge_time), 1 , 120*60},
+  { citTIME,    IDD_PURGE_TIME,         FIELDOFFSET(Method,method_table.purge_time), 0 , 120*60},   // 0 to disable. P.P. 05/25/04
+//  { citTIME,    IDD_PURGE_TIME,         FIELDOFFSET(Method,method_table.purge_time), 1 , 23*60},
+  { citTIME,    IDD_X1_TIME,            FIELDOFFSET(Method,method_table.x1_time), 0 , 120*60},   // added. 0 - disable. P.P. 07/29/04
+//  { citTIME,    IDD_DESORB_TIME,        FIELDOFFSET(Method,method_table.desorb_time), 0 , 10*60  }, // rem P.P. 02/20/06   restored 03/12/17
+  { citTIME,    IDD_X1_OFF_TIME,        FIELDOFFSET(Method,method_table.x1_off_time), 0 , 120*60},   // added. 0 - disable. P.P. 06/18/06
+// block of code added for additional X-valves. P.P. 06/20/10
+  { citTIME,    IDD_X2_TIME,            FIELDOFFSET(Method,method_table.x2_time), 0 , 120*60},   // added. 0 - disable. P.P. 06/20/10
+  { citTIME,    IDD_X2_OFF_TIME,        FIELDOFFSET(Method,method_table.x2_off_time), 0 , 120*60},   
+  { citTIME,    IDD_X3_TIME,            FIELDOFFSET(Method,method_table.x3_time), 0 , 120*60},   // added. 0 - disable. P.P. 06/20/10
+  { citTIME,    IDD_X3_OFF_TIME,        FIELDOFFSET(Method,method_table.x3_off_time), 0 , 120*60},   
+  { citTIME,    IDD_X4_TIME,            FIELDOFFSET(Method,method_table.x4_time), 0 , 120*60},   // added. 0 - disable. P.P. 06/20/10
+  { citTIME,    IDD_X4_OFF_TIME,        FIELDOFFSET(Method,method_table.x4_off_time), 0 , 120*60},   
+  { citTIME,    IDD_X5_TIME,            FIELDOFFSET(Method,method_table.x5_time), 0 , 120*60},   // added. 0 - disable. P.P. 07/01/10
+  { citTIME,    IDD_X5_OFF_TIME,        FIELDOFFSET(Method,method_table.x5_off_time), 0 , 120*60},   
+// end
+  { citONOFF,   IDD_SYRINGE_INJ,        FIELDOFFSET(Method,method_table.syringe_on_off),        },
+  { citONOFF,   IDD_311_TWA,            FIELDOFFSET(Method,method_table.TWA_on_off),    },
+  #if INTERNAL()
+  { citCYCLE,   IDD_TWA_CYCLE,          FIELDOFFSET(Method,method_table.TWA_cycle),1,24  },
+  #else
+  { citCYCLE,   IDD_TWA_CYCLE,          FIELDOFFSET(Method,method_table.TWA_cycle),1,8  },
+  #endif
+  { citCYCLE,   IDD_CALIBRATION_CYCLE,  FIELDOFFSET(Method,method_table.cal_cycle),0,24 },
+//#if GC321() // repeat cycle in min. P.P. 07/01/10
+#elif GC321()||GC326() // P.P. 12/08/18
+  { citCYCLE,   IDD_REPEAT_CYCLE,       FIELDOFFSET(Method,method_table.repeat_cycle),1,1440      },  // increased to use min, up to 24 hours
+//  { citCYCLE,   IDD_REPEAT_CYCLE,       FIELDOFFSET(Method,method_table.repeat_cycle),1,24      },
+#else
+  { citCYCLE,   IDD_REPEAT_CYCLE,       FIELDOFFSET(Method,method_table.repeat_cycle),1,24      },
+#endif
+  { citONOFF,   IDD_ALARMS,             FIELDOFFSET(Method,method_table.alarms_on_off), },
+  { citONOFF,   IDD_311_STEL,           FIELDOFFSET(Method,method_table.STEL_on_off),   },
+  { citONOFF,   IDD_PAPER_SAVE,         FIELDOFFSET(Method,method_table.paper_save_on_off),     },
+  { citONOFF,   IDD_CONT_PUMP,          FIELDOFFSET(Method,method_table.cont_pump_on_off),      },
+  { citONOFF,   IDD_311_PLOTTER,        FIELDOFFSET(Method,method_table.plotter_on_off),        },
+  { citONOFF,   IDD_CHECK_ALARM,        FIELDOFFSET(Method,method_table.check_alarm),           }, // added. P.P. 04/06/03
+  { citStr,     IDD_METHOD_NOTES,       FIELDOFFSET(Method,Notes),      },
+
+  { citONOFF,   IDD_RAMPING    ,FIELDOFFSET(Method,method_table.RampingEnabled),},
+  { citTIME,    IDD_HOLD_TIME_1,FIELDOFFSET(Method,method_table.OvenHoldTime1),0,24*60},
+  { citINT,     IDD_RAMP_1     ,FIELDOFFSET(Method,method_table.OvenRampR1),0,200},
+//#if GC321()
+#if GC321()||GC326() // P.P. 12/08/18
+//  { citTEMP,    IDD_HOLD_TEMP_2,FIELDOFFSET(Method,method_table.OvenHoldT2),0,250}, // P.P. 11/29/11
+  { citTEMP,    IDD_HOLD_TEMP_2,FIELDOFFSET(Method,method_table.OvenHoldT2),0,300}, // P.P. 12/08/18
+#else
+  { citTEMP,    IDD_HOLD_TEMP_2,FIELDOFFSET(Method,method_table.OvenHoldT2),0,200},
+#endif
+  { citTIME,    IDD_HOLD_TIME_2,FIELDOFFSET(Method,method_table.OvenHoldTime2),0,24*60},
+  { citINT,     IDD_RAMP_2     ,FIELDOFFSET(Method,method_table.OvenRampR2),0,200},
+//#if GC321()
+#if GC321()||GC326() // P.P. 12/08/18
+//  { citTEMP,    IDD_HOLD_TEMP_3,FIELDOFFSET(Method,method_table.OvenHoldT3),0,250}, // P.P. 11/29/11
+  { citTEMP,    IDD_HOLD_TEMP_3,FIELDOFFSET(Method,method_table.OvenHoldT3),0,300}, // P.P. 12/08/18
+#else
+  { citTEMP,    IDD_HOLD_TEMP_3,FIELDOFFSET(Method,method_table.OvenHoldT3),0,200},
+#endif
+  { citTIME,    IDD_HOLD_TIME_3,FIELDOFFSET(Method,method_table.OvenHoldTime3),0,24*60},
+  { citDouble,  IDD_TEMP_SLOPE,FIELDOFFSET(Method,method_table.TempSlope),0,1000.0}, // added. P.P. 07/20/06
+  { citDouble,  IDD_TEMP_INTERCEPT,FIELDOFFSET(Method,method_table.TempIntercept),-100.0,100.0}, // added. P.P. 07/20/06
+  { citONOFF,   IDD_TEMP_SETTING,FIELDOFFSET(Method,method_table.TempSetting),      },
+  { citONOFF,   IDD_2ND_PUMP,		FIELDOFFSET(Method,method_table.second_pump_on_off),    }, // added 01/30/09
+  { citTIME,    IDD_CONC_PREHEAT_TIME,  FIELDOFFSET(Method,method_table.dsb_preheat_time), 0 , 5*60       }, // P.P. 03/07/10
+  { citTIME,    IDD_QUICK_SCAN_TIME,  FIELDOFFSET(Method,method_table.quick_scan_time), 0 , 5*60       }, // P.P. 12/14/10
+  { citONOFF,   IDD_QUICK_SCAN, FIELDOFFSET(Method,method_table.quick_scan_enabled),},          // P.P. 12/14/10
+  { citTIME,    IDD_ZERO_GAS_TIME,  FIELDOFFSET(Method,method_table.zero_gas_time), 0 , 5*60       }, // P.P. 03/15/11
+  { citCYCLE,   IDD_ZERO_GAS_CYCLE, FIELDOFFSET(Method,method_table.zero_gas_cycle),0 , 1440      },  // use min, up to 24 hours, P.P. 03/15/11
+  { citONOFF,   IDD_DOOR_MANUAL, FIELDOFFSET(Method,method_table.oven_door_manual),},            // P.P. 09/06/12
+  { citTIME,    IDD_DESORB_TIME, FIELDOFFSET(Method,method_table.desorb_time), 0 , 10*60  }, // rem P.P. 02/20/06   restored 03/12/17
+  { citTEMP,    IDD_LINE_TEMP, FIELDOFFSET(Method,method_table.line_temp), 0 , 150  }, // P.P. 03/28/17
+  { citTIME,    IDD_NEXT_POINT_TIME, FIELDOFFSET(Method,method_table.next_point_time), 0 , 120*60},   // 0 to disable. P.P. 10/16/17
+  { citTIME,    IDD_CONC_WAIT_TIME, FIELDOFFSET(Method,method_table.dsb_wait_time), 0 , 5*60},   // 0 to disable. P.P. 03/26/18
+
+  { citNULL }   // End of array marker
+};
+
+#ifndef  _PREF_H
+#include "pref.h"
+#endif
+
+class MethodDlg : public TransferPlusDlg {
+  typedef TransferPlusDlg Inherited;
+ public:
+   MethodDlg(PTWindowsObject AParent, int ResourceId, Method *pMethod, Preferences &_Pref, PTModule AModule = NULL)
+    : TransferPlusDlg(AParent, ResourceId, pMethod, MethodTableControlInfo, AModule), Pref(_Pref) {}
+ protected:
+  Preferences &Pref;
+  virtual void SetupWindow()
+  {
+    Inherited::SetupWindow();
+    Centralize(this);
+  }
+  virtual void SetupControls(void *data);
+  virtual void AcceptControls(void *data);
+  virtual void Print(RTMessage Msg) = [ID_FIRST + IDPRINT];
+  virtual void Ramping(RTMessage Msg) = [ID_FIRST + IDD_RAMPING]
+  {
+    ReflectRamping();
+  }
+  void ReflectRamping();
+
+  virtual void Alarms(RTMessage Msg) = [ID_FIRST + IDD_ALARMS]
+  {
+    ReflectAlarms();
+  }
+  void ReflectAlarms();
+  virtual void WMCommand(RTMessage Msg) = [WM_FIRST + WM_COMMAND]
+  {
+    if(IDD_POINTS<Msg.WParam && Msg.WParam<=IDD_POINTS+MAX_POINTS) {
+      ReflectAlarms();
+    }
+    Inherited::WMCommand(Msg);
+  }
+  virtual void PointsAlarms(RTMessage Msg) = [ID_FIRST + IDD_POINTS_ALARMS]
+  {
+    points.method_table.alarms_on_off=IsDlgButtonChecked(HWindow, IDD_ALARMS);
+    TDialog *dlg=new PointsAndAlarmsDlg(this, ID_POINTSDIALOG, &points, Pref);
+    GetApplication()->ExecDialog(dlg);
+  }
+  Method points;
+// added. P.P. 07/21/06
+  void ReflectTempSetting(); // added. P.P. 07/21/06
+  virtual void TempSetting(RTMessage Msg) = [ID_FIRST + IDD_TEMP_SETTING]
+  {
+    ReflectTempSetting();
+  }
+//  void ReflectTempSetting(); // added. P.P. 07/21/06 moved up.
+// end of added function. P.P. 07/21/06
+  void Reflect2ndPump(); // added. P.P. 01/30/09
+  virtual void SecondPump(RTMessage Msg) = [ID_FIRST + IDD_2ND_PUMP] // added P.P. 01/30/09
+  {
+    Reflect2ndPump();
+  }
+// added P.P. 03/15/11
+  void ReflectQuickScan();
+  virtual void QuickScan(RTMessage Msg) = [ID_FIRST + IDD_QUICK_SCAN]
+  {
+    ReflectQuickScan();
+  }
+};
+
+#include "internal.h" // INTERNAL()
+void MethodDlg::SetupControls(void *data)
+{
+  Inherited::SetupControls(data);
+
+
+#if INTERNAL()
+  static const int ids[]={ // not used
+#if OVEN_EQ_INJ()
+    IDD_INJDET_TEMP_LABEL,  // P.P. 08/01/18
+    IDD_INJDET_TEMP,	
+#if !FID() // cond added. P.P. 03/26/10 here 04/23/10
+    IDD_FID_TEMP_LABEL,
+    IDD_FID_TEMP, // remove it to replace it for FID TEMP via desorb_label. P.P. 05/18/12
+#endif // !fid
+#if !CONCENTRATOR() // cond added. P.P. 02/20/06
+    IDD_DESORBER_GROUP_BOX,  // P.P. 07/30/18
+    IDD_DESORB_TEMP,
+    IDD_DESORB_TEMP_LABEL,  // added here to show "FID Temp". P.P. 05/18/12
+//    IDD_DESORB_TEMP_LABEL,  // 2 lines added. P.P. 06/18/06
+    IDD_DESORB_TIME_LABEL,    // 
+    IDD_DESORB_TIME,              // P.P. 03/24/17
+//    IDD_DSB_PREHEAT_TIME,       // 2 lines added. P.P. 03/07/10
+//    IDD_DSB_PREHEAT_TIME_LABEL,
+    IDD_CONC_PREHEAT_TIME,       // 2 lines added. P.P. 03/24/10
+    IDD_CONC_PREHEAT_TIME_LABEL,
+    IDD_CONC_WAIT_TIME_LABEL,      // P.P. 05/12/18
+    IDD_CONC_WAIT_TIME,            //                                    //
+    IDD_PURGE_TIME,             // P.P. 05/12/18
+    IDD_PURGE_TIME_LABEL,       //
+#endif
+#if !HEATED_LINE()  // P.P. 03/28/17
+    IDD_LINE_TEMP,
+    IDD_LINE_TEMP_LABEL,
+#endif
+#if !X1_VALVE()   // changed. P.P. 12/10/04
+    IDD_X1_TIME,          //
+    IDD_X1_TIME_LABEL,    //
+    IDD_X1_OFF_TIME,          // 2 lines added. P.P. 06/18/06
+    IDD_X1_OFF_TIME_LABEL,    //
+    IDD_X2_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X2_TIME_LABEL,    
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+    IDD_X4_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X4_TIME_LABEL,
+    IDD_X4_OFF_TIME,          
+    IDD_X4_OFF_TIME_LABEL,
+    IDD_X5_TIME,             // X5 added. P.P. 07/01/10
+    IDD_X5_TIME_LABEL,    
+    IDD_X5_OFF_TIME,          
+    IDD_X5_OFF_TIME_LABEL,
+#else  // with X1_VALVE 
+#if GC312() // in case of GC312 - leave only x1 for AZ-1, X4 and X4. P.P. 11/12/10
+/*  // not removing these for GC312. P.P. 09/11/15
+    IDD_X2_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X2_TIME_LABEL,    
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+*/
+#if FID() // rem -  with FID in 312, bit 4 (oven_door) used for 2nd pump. P.P. 08/30/17
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+#endif
+
+//#elif (POINTS()==25) // leave only x1 for AZ-1, P.P. 04/01/11
+//#elif ((POINTS()==25)||QUICK_SCAN()) // leave only x1 for AZ-1, P.P. 05/13/11
+#elif ((POINTS()==25)||QUICK_SCAN()) // leave only x5 for AZ-1, P.P. 05/13/11
+    IDD_X1_TIME,          //
+    IDD_X1_TIME_LABEL,    //
+    IDD_X1_OFF_TIME,          // 2 lines added. P.P. 06/18/06
+    IDD_X1_OFF_TIME_LABEL,    //
+    IDD_X2_TIME,             //  P.P. 04/01/11
+    IDD_X2_TIME_LABEL,    
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+    IDD_X4_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X4_TIME_LABEL,
+    IDD_X4_OFF_TIME,
+    IDD_X4_OFF_TIME_LABEL,    
+//    IDD_X5_TIME,             // X5 added. P.P. 07/01/10
+//    IDD_X5_TIME_LABEL,    
+//    IDD_X5_OFF_TIME,          
+//    IDD_X5_OFF_TIME_LABEL,
+#elif WATER_PUMP()
+    IDD_X2_TIME,             //  P.P. 04/01/11
+    IDD_X2_TIME_LABEL,    
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+    IDD_X4_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X4_TIME_LABEL,
+    IDD_X4_OFF_TIME,
+    IDD_X4_OFF_TIME_LABEL,    
+    IDD_X5_TIME,             // X5 added. P.P. 07/01/10
+    IDD_X5_TIME_LABEL,    
+    IDD_X5_OFF_TIME,          
+    IDD_X5_OFF_TIME_LABEL,
+
+#endif // gc312 or points==25 or water_pump()
+#endif // x1 or GC501
+#else // 2 temp zones         // cond added. P.P. 02/20/06
+#if !CONCENTRATOR() // cond added. P.P. 02/20/06
+    IDD_DESORBER_GROUP_BOX,  // P.P. 07/30/18
+    IDD_DESORB_TEMP_LABEL,  // 2 lines added. P.P. 06/18/06
+    IDD_DESORB_TEMP,
+    IDD_DESORB_TIME_LABEL,    // 
+    IDD_DESORB_TIME,              // P.P. 03/24/17
+//    IDD_DSB_PREHEAT_TIME,       // 2 lines added. P.P. 03/07/10
+//    IDD_DSB_PREHEAT_TIME_LABEL,
+    IDD_CONC_PREHEAT_TIME,       // 2 lines added. P.P. 03/24/10
+    IDD_CONC_PREHEAT_TIME_LABEL,
+    IDD_CONC_WAIT_TIME_LABEL,      // P.P. 05/12/18
+    IDD_CONC_WAIT_TIME,            //                                    //
+    IDD_PURGE_TIME,             // P.P. 05/12/18
+    IDD_PURGE_TIME_LABEL,       //
+#endif
+#if !HEATED_LINE()  // P.P. 03/28/17
+    IDD_LINE_TEMP,
+    IDD_LINE_TEMP_LABEL,
+#endif
+#if !FID() // cond added. P.P. 03/26/10
+    IDD_FID_TEMP,
+    IDD_FID_TEMP_LABEL,  // added here to show "FID Temp". P.P. 05/18/12
+#endif // !fid
+//#endif // oven_eq_inj   // rem P.P. 11/12/10
+#if !X1_VALVE() // cond added. P.P. 06/10/06
+    IDD_X1_TIME, // restored and placed differently from InjTemp. P.P. 06/09/06
+    IDD_X1_TIME_LABEL,    //
+    IDD_X1_OFF_TIME,          
+    IDD_X1_OFF_TIME_LABEL,    
+    IDD_X2_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X2_TIME_LABEL,    
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+    IDD_X4_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X4_TIME_LABEL,
+    IDD_X4_OFF_TIME,
+    IDD_X4_OFF_TIME_LABEL,
+    IDD_X5_TIME,             // X5 added. P.P. 07/01/10
+    IDD_X5_TIME_LABEL,    
+    IDD_X5_OFF_TIME,          
+    IDD_X5_OFF_TIME_LABEL,
+#else // with X1_valve
+#if GC312() // added to leave only 2 additional valves for GC312. P.P. 11/12/10
+/* // not removing them in GC312. P.P. 09/11/15
+    IDD_X2_TIME,             
+    IDD_X2_TIME_LABEL,
+    IDD_X2_OFF_TIME,          
+    IDD_X2_OFF_TIME_LABEL,    
+    IDD_X3_TIME,             // 3 more valves added. P.P. 06/20/10
+    IDD_X3_TIME_LABEL,    
+    IDD_X3_OFF_TIME,          
+    IDD_X3_OFF_TIME_LABEL,    
+*/
+#endif // gc312
+#endif // !x1_valve
+#endif // oven eq inj
+    //IDD_ANALYSIS_TIME,
+//#if STAND_ALONE()&&TRACE_GC() // added as possible variant. P.P. 01/17/04
+//    IDD_OVEN_TEMP_LABEL,      // and restored for a while.
+//    IDD_OVEN_TEMP,
+//    IDD_SAMPLE_TIME,
+//    IDD_INJECT_TIME,
+//#endif // stand_alone. P.P. 01/17/04
+//#if !GC321() // P.P. 07/11/02
+#if !(GC321()||GC326()) // P.P. 12/08/18
+#if !GC312() // cond added. P.P. 04/27/06
+    IDD_SYRINGE_INJ,   // P.P. 03/29/02 - in GC321 and GC312 this should be shown
+#else // gc312, added P.P. 02/07/09
+#if !FID() // cond added 06/03/09  cond removed P.P. 03/24/10
+    IDD_2ND_PUMP,  // no 2nd pump in GC312 rem 
+#endif // !fid
+#endif // !gc312
+    IDD_DOOR_MANUAL,  // P.P. 10/24/14
+//#if !GC501()  // moved down. P.P. 01/02/10                  // cond and 7 items added. P.P. 07/11/04
+#if GC312()                    // cond added to have equil time in GC301. P.P. 01/02/10
+//    IDD_CALIBRATE_TIME,         //  activated for GC312. P.P. 10/04/12
+//    IDD_CALIBRATE_TIME_LABEL,   //
+//    IDD_EQUILIBRATE_TIME,       //  2 lines moved down. P.P. 02/11/06
+//    IDD_EQUILIBRATE_TIME_LABEL, //
+#endif // gc312
+#if !SAMPLE_AHEAD()    // cond. added, to use sample ahead not only in 501. P.P. 08/22/04 
+    IDD_NEXT_POINT_TIME_LABEL,   // P.P. 07/22/18
+    IDD_NEXT_POINT_TIME,         //  
+#endif
+//#if !(SAMPLE_AHEAD()||CONCENTRATOR())    // changed. P.P. 02/11/06
+#if !CONCENTRATOR()    // changed. P.P. 07/22/18
+    IDD_DESORBER_GROUP_BOX, // P.P. 07/22/18
+    IDD_DESORB_TEMP_LABEL,  // 2 lines added. P.P. 06/18/06
+    IDD_DESORB_TEMP,
+    IDD_DESORB_TIME_LABEL,    // 
+    IDD_DESORB_TIME,              // P.P. 03/24/17
+//    IDD_DSB_PREHEAT_TIME,       // 2 lines added. P.P. 03/07/10
+//    IDD_DSB_PREHEAT_TIME_LABEL,
+    IDD_CONC_PREHEAT_TIME,       // all related to concentrator. P.P. 07/22/18
+    IDD_CONC_PREHEAT_TIME_LABEL,
+    IDD_CONC_WAIT_TIME_LABEL,      // P.P. 05/12/18
+    IDD_CONC_WAIT_TIME,            //                                    //
+    IDD_PURGE_TIME,             //
+    IDD_PURGE_TIME_LABEL,       //
+#endif // concentrator
+//#if !GC501()
+#if !(GC501()||QUICK_SCAN()) // quick scan works with check alarm. P.P. 12/24/10
+    IDD_CHECK_ALARM,            //
+#endif  // !gc501         //
+#if !QUICK_SCAN()
+    IDD_QUICK_SCAN_GROUP_BOX,  // added. P.P. 07/22/18
+    IDD_QUICK_SCAN, //
+    IDD_QUICK_SCAN_TIME, // 3 lines added for quick scan. P.P. 12/14/10
+    IDD_QUICK_SCAN_TIME_LABEL, //
+    IDD_ZERO_GAS_TIME,   // added. P.P. 03/15/11
+    IDD_ZERO_GAS_CYCLE,  //
+    IDD_ZERO_GAS_TIME_LABEL,   // added. P.P. 03/25/11
+    IDD_ZERO_GAS_CYCLE_LABEL,  //
+#endif // !quick scan
+#else // gc321 or 322              // for GC321, P.P. 07/11/02
+#if !SAMPLE_AHEAD()    // cond. added, to use sample ahead not only in 501. P.P. 08/22/04
+    IDD_NEXT_POINT_TIME_LABEL,   // P.P. 07/22/18
+    IDD_NEXT_POINT_TIME,         //  
+#endif
+    IDD_311_TWA,          // hide this and some more for GC321. P.P. 04/29/02
+//    IDD_TWA_CYCLE_LABEL,  // hide  //restored. P.P. 07/02/10
+//    IDD_TWA_CYCLE,      // hide    //
+//    IDD_CALIBRATION_CYCLE,  // hide  restored. P.P. 06/09/06
+//    IDD_REPEAT_CYCLE,       // hide  restored. P.P. 06/09/06
+//    IDD_SAMPLE_TIME,        // P.P. 06/13/02 - do not need these items in GC321
+//    IDD_INJECT_TIME,        //
+    IDD_ALARMS,             // hide
+// some more added. P.P. 06/09/06
+//    IDD_CALIBRATE_TIME,         //   // 4 lines restored for GC322. P.P. 10/10/12
+//    IDD_CALIBRATE_TIME_LABEL,   //
+//    IDD_EQUILIBRATE_TIME,       // use it for desorb time. P.P. 02/20/06
+//    IDD_EQUILIBRATE_TIME_LABEL, //
+    IDD_CHECK_ALARM,            //
+// end of added IDDs
+#if RAMPING() // in GC322. P.P. 01/30/09
+    IDD_2ND_PUMP,  // remove for GC322
+#endif // ramping 
+#if !QUICK_SCAN()   // added here 03/15/11
+    IDD_QUICK_SCAN_GROUP_BOX,  // added. P.P. 07/22/18
+    IDD_QUICK_SCAN, //
+    IDD_QUICK_SCAN_TIME, // 3 lines added for quick scan. P.P. 12/14/10
+    IDD_QUICK_SCAN_TIME_LABEL, //
+//    IDD_QUICK_SCAN_LABEL, //  // P.P. 09/30/11
+    IDD_ZERO_GAS_TIME,   // added. P.P. 03/15/11
+    IDD_ZERO_GAS_CYCLE,  //
+    IDD_ZERO_GAS_TIME_LABEL,   // added. P.P. 09/30/11
+    IDD_ZERO_GAS_CYCLE_LABEL,  //
+#endif // !quick scan
+#endif // gc322
+    IDD_311_STEL,
+    IDD_PAPER_SAVE,
+//   #if GC321()
+//#if GC321()||STAND_ALONE()||CONCENTRATOR()||GC312() // replaced. P.P. 04/27/06 restored.P.P. 07/02/10
+#if GC321()||GC326()||STAND_ALONE()||CONCENTRATOR()||GC312() // P.P. 12/08/18
+//#if /*GC321()||*/STAND_ALONE()||CONCENTRATOR()||GC312() // replaced. P.P. 03/21/08
+//   #if GC321()||STAND_ALONE()||CONCENTRATOR() // replaced. P.P. 02/20/06
+//   #if GC321()||STAND_ALONE() // replaced. P.P. 01/17/04  Restored for 501. P.P. 09/25/05
+//   #if GC321()||STAND_ALONE()||GC501() // replaced. P.P. 07/11/04
+    IDD_CONT_PUMP,         // hide
+#endif
+    IDD_311_PLOTTER,
+
+    0 // end of array
+  };
+  for(const int *id=ids; *id; id++) {
+  //  EnableWindow(GetDlgItem(HWindow,*id),FALSE);  // replaced. P.P. 04/29/02
+    ShowWindow(GetDlgItem(HWindow,*id),SW_HIDE);
+  }
+/// Removing Points and Alarms button for GC321. P.P. 04/29/02
+//#if GC321()
+#if GC321()||GC326() // P.P. 12/08/18
+      ShowWindow(GetDlgItem(HWindow,IDD_POINTS_ALARMS),SW_HIDE);
+      ShowWindow(GetDlgItem(HWindow,IDD_PURGE_TIME_LABEL),SW_HIDE);  // 4 lines added. P.P. 06/09/06
+      ShowWindow(GetDlgItem(HWindow,IDD_PURGE_TIME),SW_HIDE);        //
+      EnableWindow(GetDlgItem(HWindow,IDD_CALIBRATION_CYCLE),FALSE); //
+//      EnableWindow(GetDlgItem(HWindow,IDD_REPEAT_CYCLE),FALSE);      //  enabled now for GC322. P.P. 07/01/10
+      EnableWindow(GetDlgItem(HWindow,IDD_CALIBRATION_CYCLE_LABEL),FALSE); //  2 lines added 03/23/08
+//      EnableWindow(GetDlgItem(HWindow,IDD_REPEAT_CYCLE_LABEL),FALSE);      // leave it shown. P.P. 07/02/10
+
+//    EnableWindow(GetDlgItem(HWindow,IDD_POINTS_ALARMS),FALSE);
+//      EnableWindow(GetDlgItem(HWindow,IDD_SAMPLE_TIME),FALSE);   // added P.P. 06/13/02 removed 07/11/02
+//      EnableWindow(GetDlgItem(HWindow,IDD_INJECT_TIME),FALSE);   // rem 03/21/08
+#endif // GC321() // moved from below. P.P. 01/17/04
+#if GC312() // added. P.P. 03/26/06
+      EnableWindow(GetDlgItem(HWindow,IDD_POINTS_ALARMS),FALSE);
+      EnableWindow(GetDlgItem(HWindow,IDD_ALARMS),FALSE);
+#endif // gc312, moved here
+#if MANUAL_INJ() // added. P.P. 05/19/06
+      EnableWindow(GetDlgItem(HWindow,IDD_SAMPLE_TIME),FALSE);
+      EnableWindow(GetDlgItem(HWindow,IDD_INJECT_TIME),FALSE);
+#endif // manual inj
+// #endif // gc312 moved up, to separate cases. P.p. 06/09/06
+#if GC501() // cond added. P.P. 07/10/04
+#if !SAMPLE_AHEAD()                                              // added. P.P. 05/25/04
+      EnableWindow(GetDlgItem(HWindow,IDD_PURGE_TIME),FALSE);   //
+#endif // sample_ahead                                           //
+#endif // gc501
+#if STAND_ALONE()                                                // added. P.P. 08/16/02
+      EnableWindow(GetDlgItem(HWindow,IDD_SAMPLE_TIME),FALSE);   //
+#if !MANUAL_INJ() // cond added for stand alone with Toven control. P.P. 01/04/16
+      EnableWindow(GetDlgItem(HWindow,IDD_OVEN_TEMP),FALSE);   //
+#endif
+      EnableWindow(GetDlgItem(HWindow,IDD_RAMPING),FALSE);   //
+      EnableWindow(GetDlgItem(HWindow,IDD_INJECT_TIME),FALSE);   //
+      EnableWindow(GetDlgItem(HWindow,IDD_CALIBRATION_CYCLE),FALSE); // added. P.P. 01/17/04
+#if !OVEN_EQ_INJ()
+      EnableWindow(GetDlgItem(HWindow,IDD_INJDET_TEMP),FALSE);   //
+#endif // !OVEN_EQ_INJ
+#endif // stand_alone
+
+//#else // 301b
+ //     EnableWindow(GetDlgItem(HWindow,IDD_RAMPING),FALSE);   //added and  removed. 07/11/02
+
+// #endif // GC321() // moved up. P.P. 01/17/04
+#else // non-internal case added. P.P. 09/25/04
+   // code removed. P.P. 09/01/18
+#endif // Internal
+  ReflectRamping();
+  const Method *pMethod=(Method *)data;
+
+  points.method_table.points=pMethod->method_table.points;
+  points.method_table.lalarms=pMethod->method_table.lalarms;
+  points.method_table.halarms=pMethod->method_table.halarms;
+#if QUICK_SCAN()
+//  EnableWindow(GetDlgItem(HWindow,IDD_QUICK_SCAN),TRUE);   // added. P.P. 03/15/11
+  ReflectQuickScan(); // added. P.P. 03/15/11
+#endif
+  ReflectAlarms();
+  ReflectTempSetting(); // added. P.P. 07/21/06
+  Reflect2ndPump();     // added P.P. 01/30/09
+//  ReflectQuickScan(); // added. P.P. 03/15/11
+}
+
+void MethodDlg::AcceptControls(void *data)
+{
+  Inherited::AcceptControls(data);
+
+  Method *pMethod=(Method *)data;
+  pMethod->method_table.points=points.method_table.points;
+  pMethod->method_table.lalarms=points.method_table.lalarms;
+  pMethod->method_table.halarms=points.method_table.halarms;
+}
+
+
+
+void MethodDlg::ReflectRamping()
+{
+#if INTERNAL()
+#if RAMPING()  // changed - ramping must be set 1 or 0 for any GCs. 03/23/08
+  int b=1;
+#else // 
+  int b = 0;
+#endif  // GC321
+#else // !INTERNAL
+  int b=1;//Pref.GC311version=="2.0";
+#endif  // Internal
+  {
+    for(int id=IDD_TP; id<=IDD_RAMPING; id++) {
+      EnableWindow(GetDlgItem(HWindow,id),b);
+    }
+  }
+//  #if GC321()  // P.P. 07/11/02
+#if INTERNAL() // cond added. P.P. 09/25/04
+//#if GC321() || RAMPING() // P.P. 09/28/02
+#if GC321()||GC326()||RAMPING() // P.P. 12/08/18
+  b=b&&IsDlgButtonChecked(HWindow, IDD_RAMPING);
+#else // 07/14/02
+  b = 0;   // disabling all ramping windows.
+#endif // GC321. 07/14/02
+#else // non-internal. P.P. 09/25/04
+  b=b&&IsDlgButtonChecked(HWindow, IDD_RAMPING);
+#endif // internal. P.P. 09/25/04
+  {
+    for(int id=IDD_HOLD_TIME_1_LABEL; id<=IDD_HOLD_TIME_3; id++) {
+      EnableWindow(GetDlgItem(HWindow,id),b);
+    }
+  }
+}
+
+
+void MethodDlg::ReflectAlarms()
+{
+  int b=IsDlgButtonChecked(HWindow, IDD_ALARMS);
+  {
+    EnableWindow(GetDlgItem(HWindow,IDD_LOW_ALARMS),b);
+    for(int id=IDD_LA1; id<=IDD_LOW_ALARMS+POINTS(); id++) {
+      int b1=b&&IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_LOW_ALARMS));
+      EnableWindow(GetDlgItem(HWindow,id),b1);
+    }
+  }
+  {
+    EnableWindow(GetDlgItem(HWindow,IDD_HIGH_ALARMS),b);
+    for(int id=IDD_HA1; id<=IDD_HIGH_ALARMS+POINTS(); id++) {
+      int b1=b&&IsDlgButtonChecked(HWindow,IDD_POINTS+(id-IDD_HIGH_ALARMS));
+      EnableWindow(GetDlgItem(HWindow,id),b1);
+    }
+  }
+}
+
+// added to reflect Temp Setting. P.P. 07/21/06
+void MethodDlg::ReflectTempSetting()
+{
+  int b=IsDlgButtonChecked(HWindow, IDD_TEMP_SETTING);
+  {
+    for(int id=IDD_TEMP_SLOPE_LABEL; id<=IDD_TEMP_INTERCEPT; id++) {
+      EnableWindow(GetDlgItem(HWindow,id),b);
+    }
+  }
+}
+// end of added code for reflecting Temp Setting. P.P. 07/21/06
+
+// added for quick scan. P.P. 03/15/11
+void MethodDlg::ReflectQuickScan()
+{
+  int b=IsDlgButtonChecked(HWindow, IDD_QUICK_SCAN);
+  {
+    for(int id=IDD_QUICK_SCAN_TIME; id<=IDD_ZERO_GAS_CYCLE_LABEL; id++) {
+      EnableWindow(GetDlgItem(HWindow,id),b);
+    }
+  }
+}
+// end of code for quick scan. P.P. 03/15/11
+// added for 2nd pump. P.P. 01/30/09
+#include "acquire.h" // added. P.P. 01/30/09
+void MethodDlg::Reflect2ndPump() // new function. P.P. 01/30/09
+{
+
+#if !CBWUSB_IO()||PMD_12LS()
+#if !RAMPING()
+#if (!GC312())||FID() // cond changed P.P. 06/03/09
+  if(IsDlgButtonChecked(HWindow, IDD_2ND_PUMP)) {
+    Acquire::OvenDoor(TRUE);
+  }
+  else {
+    Acquire::OvenDoor(FALSE);
+  }
+#endif // !gc312
+#endif // !ramping
+#else //with dio board. P.P. 08/07/18
+  Acquire *pAcquire;
+// changed to control 2nd pump independently on Oven Door. P.P. 08/07/18
+  if(IsDlgButtonChecked(HWindow, IDD_2ND_PUMP)) {
+//    Acquire::SecondPump(TRUE);
+    pAcquire->SecondPump(TRUE);
+  }
+  else {
+    pAcquire->SecondPump(FALSE);
+  }
+#endif // CBWUSB_IO()
+}
+// end of code for 2nd pump. 01/30/09
+
+#ifndef  _WINLIB_DC_H
+#include "winlib\dc.h"
+#endif
+#ifndef  _WINUTIL_WPRINT_H
+#include "winutil\wprint.h"
+#endif
+
+class MethodPrintout : public Printout
+{
+  typedef Printout Inherited;
+ protected:
+  Method *pMethod;
+  int hLine;
+  int LinesPerPage;
+  int NumLines;
+ public:
+  MethodPrintout(LPCSTR ATitle, Method *_pMethod) : Printout(ATitle), pMethod(_pMethod) {}
+  virtual void SetPrintParams(DC *_pdc, WPoint pageSize);
+  virtual BOOL HasPage(int pageNumber)
+  {
+    return (pageNumber-1)*LinesPerPage<NumLines;
+  }
+  virtual void PrintPage(int page, WRect& rect, unsigned flags);
+};
+
+void MethodPrintout::SetPrintParams(DC *_pdc, WPoint pageSize)
+{
+  Inherited::SetPrintParams(_pdc,pageSize);
+  hLine=pdc->GetTextExtent("H").Y();
+  if(!hLine || (LinesPerPage=PageSize.Y()/hLine)==0) LinesPerPage=1;
+  NumLines = 0;
+  for(ControlInfo *cip=MethodTableControlInfo; cip->type!=citNULL; cip++) {
+    NumLines++;
+  }
+}
+
+
+int LoadDATAText( HINSTANCE hInstance, LPCSTR lpszName, LPSTR lpszBuffer, int cbBuffer )
+{
+  if( lpszBuffer == 0 || cbBuffer == 0 ) return 0;
+
+  HRSRC hrsrc = FindResource( hInstance, lpszName, "DATA" );
+  if( ! hrsrc ) return 0;
+
+  HGLOBAL hmem = LoadResource( hInstance, hrsrc );
+  LPSTR str = (LPSTR) LockResource( hmem );
+  if( ! str ) return 0;
+
+  int size = Min( (int)SizeofResource( hInstance, hrsrc ), cbBuffer );
+
+  //lstrcpyn( lpszBuffer, str, size );
+  LPSTR out = lpszBuffer;
+  for( int j = 0; j < size; str++, j++ ) {
+    switch( *str ) {
+      default: *out++ = *str;
+    }
+  }
+  *out = '\0';
+
+  UnlockResource( hmem );
+  FreeResource( hmem );
+
+  return size;
+}
+
+void PrintMethod(int page,int LinesPerPage,Method *pMethod,DC *pdc,WRect &rect);
+void GetPage(DC &ic,WRect *rect,const WPoint &size);
+void MethodPrintout::PrintPage(int page, WRect&/*_rect*/, unsigned /*flags*/)
+{
+  WRect rect;
+  GetPage(*pdc,&rect,PageSize);
+  pdc->IntersectClipRect(rect);
+  PrintMethod(page,LinesPerPage,pMethod,pdc,rect);
+}
+
+#include "wcpplib\wlist.h"
+class StrNode: public List::Node, public Str // meth_func.cpp
+{
+ public:
+  StrNode(const char *str=0);
+};
+void StrPrintMethod(Method *pMethod, List *list)
+{
+  char str[1024];
+  LoadDATAText( GetApplicationObject()->hInstance, "MethodPrintFormat", str, sizeof(str) );
+
+  char *cp=str;
+
+  //int l=0;
+  for(int i=0; /*i<NumLines &&*/ i< 11111; i++) {
+    char prn[256],*p=prn;
+    for( ; *cp; cp++) {
+      switch(*cp) {
+        case 12: return;
+        default:
+          *p++=*cp;
+        break;
+        case '$':
+        {
+          cp++;
+          int id=*(((int *)cp)); cp++;
+          for(ControlInfo *cip=MethodTableControlInfo; cip->type!=citNULL; cip++) {
+            if(id==cip->idControl) {
+              char buff[256];
+              void *data=(char *)pMethod + cip->offset;
+              switch(cip->type) {
+                case citINT:
+                  wsprintf(buff,"%d", *(int *)data);
+                break;
+                case citLONG:
+                  wsprintf(buff,"%d", *(long *)data);
+                break;
+                case citDouble:
+                  wsprintf(buff,"%f", *(double *)data);
+                break;
+                case citTEMP:
+                  wsprintf(buff,"%u", *(unsigned *)data);
+                break;
+                case citTIME:
+                {
+                  long l=*(long *)data;
+                  char str[12];
+                  wsprintf(str, "%ld:%.2d",l/60,(int)(l%60));
+                  wsprintf(buff,"%s",str);
+                }
+                break;
+                case citONOFF:
+                  wsprintf(buff,"%s", *(int *)data ? "On": "Off");
+		break;
+                case citOFFON:
+                  wsprintf(buff,"%d", *(int *)data ? "Off": "On");
+                break;
+                case citRadio:
+                {
+                  for(int i=0; i<(int)cip->info1; i++) {
+                    if((*(int *)data)==i) wsprintf(buff,"%d",i);
+                  }
+                }
+                break;
+                case citComboList:
+                  wsprintf(buff,"%d", *(int *)data);
+                break;
+                case citCYCLE:
+                  wsprintf(buff,"%d", *(int *)data);
+                break;
+                case citStr:
+                  wsprintf(buff,"%s", (LPSTR)((Str *)data)->Get() );
+                break;
+                default:
+                  *buff=0;
+                break;
+              }
+              lstrcpy(p,buff); p+=lstrlen(buff);
+              break;
+            }
+          }
+        }
+      }
+    }
+    cp++;
+    *p=0;
+
+    if(!pMethod->method_table.RampingEnabled && 3<=i && i<6) continue;
+    list->append(new StrNode(prn));
+
+    //l++;
+  }
+}
+
+void PrintMethod(int page,int LinesPerPage,Method *pMethod,DC *pdc,WRect &rect)
+{
+  List *list = new List;
+  StrPrintMethod(pMethod, list);
+
+  int nTabPositions[]={2,4,6};
+  const int cTabStops=sizeof(nTabPositions)/sizeof(nTabPositions[0]);
+  {  // convert inches to pixels
+    int resX=pdc->GetCapability(LOGPIXELSX);
+    for(int i=0; i<cTabStops; i++) nTabPositions[i]*=resX;
+  }
+
+  int l=0;
+  int hLine=pdc->GetTextExtent("H").Y();
+  StrNode *prn=(StrNode *)list->first();
+  for(int i=(page-1)*LinesPerPage; /*i<NumLines &&*/ i< page*LinesPerPage; i++) {
+    if(!prn) break;
+    pdc->TabbedTextOut(rect.Left(),rect.Top()+hLine*l,*prn,lstrlen(*prn), cTabStops, nTabPositions, rect.Left());
+    l++;
+    prn=(StrNode *)prn->nextNode();
+  }
+  destroy(list);
+}
+
+#ifndef  _PEAK_APP_H
+#include "peak_app.h"
+#endif
+
+void MethodDlg::Print(RTMessage)
+{
+  PeakApp *pApp=((PeakApp *)GetApplication());
+  Printer *pPrinter=pApp;
+  if( pPrinter ) {
+    MethodPrintout *pPrintout = new MethodPrintout(pApp->Name, (Method *)TransferBuffer);
+    if( pPrintout ) {
+      pPrinter->Print(this, pPrintout, TRUE);
+      delete pPrintout;
+    }
+  }
+}
+
+
+/* ----------------------------------------------------------------- */
+
+#ifndef  _METH_DLG_H
+#include "meth_dlg.h"
+#endif
+
+
+PTWindowsObject newMethodDlg(PTWindowsObject AParent, int ResourceId, Method *pMethod, Preferences &Pref, PTModule AModule)
+{
+  return new MethodDlg(AParent, ResourceId, pMethod, Pref, AModule);
+}
+
+
+
+
