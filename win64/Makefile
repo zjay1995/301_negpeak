@@ -11,8 +11,8 @@ CXX      ?= g++
 WINCXX   ?= x86_64-w64-mingw32-g++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
-CORE = integrator64.cpp
-HDRS = peak64.h synth64.h
+CORE = integrator64.cpp method64.cpp
+HDRS = peak64.h synth64.h method64.h
 
 all: test win64
 
@@ -31,7 +31,7 @@ build/wpeak64_cli.exe: wpeak64_cli.cpp $(CORE) $(HDRS)
 
 build/wpeak64.exe: wpeak64_gui.cpp $(CORE) $(HDRS)
 	@mkdir -p build
-	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(CORE) -o $@ -lgdi32 -luser32
+	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(CORE) -o $@ -lgdi32 -luser32 -lcomdlg32
 
 clean:
 	rm -rf build
