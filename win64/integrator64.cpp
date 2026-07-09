@@ -279,12 +279,28 @@ void Integrator::DetectNegativePeak()
 {
     if(det.peak_alg == 2)                    // curve-fit path finds its own
         return;
-    if(analyze_segment != BETWEEN_PEAKS) {   // only look when not inside a positive peak
-        neg_start_of_peak = -1;              // abandon any partial negative peak
-        return;
-    }
 
     long depth = act_thresh - scaled_sample; // how far below baseline (>0 = dipping)
+
+    if(analyze_segment != BETWEEN_PEAKS) {   // positive machine is inside a peak
+        // The recovery edge of a negative dip can itself trigger the positive
+        // peak start (rising slope with height just above noise). If that
+        // happened while a negative peak was pending and the signal is
+        // already back at the baseline, close the negative peak instead of
+        // discarding it; a dip still in progress is abandoned as before.
+        if(neg_start_of_peak >= 0 && depth <= noise) {
+            if(std::labs(neg_peak_min) >= det.MinHeight) {
+                Peak neg_peak;
+                neg_peak.Height = neg_peak_min;
+                neg_peak.From   = neg_start_of_peak;
+                neg_peak.To     = raw_time;
+                neg_peak.Time   = neg_start_of_peak + (raw_time - neg_start_of_peak) / 2;
+                peaks.push_back(neg_peak);
+            }
+        }
+        neg_start_of_peak = -1;
+        return;
+    }
 
     if(depth > noise) {                      // below baseline by > noise
         if(neg_start_of_peak < 0) {          // start of a new negative peak

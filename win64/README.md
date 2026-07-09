@@ -35,13 +35,55 @@ Negative peaks are detected and displayed but excluded from quantitation
 - `sample_run.csv` + `sample_method.ini` form a working example
   (3 identified positive peaks + 1 negative peak).
 
+## Data acquisition & instrument control (`wpeak64_acq`)
+
+The legacy Measurement Computing DAQ layer is replaced with commodity
+hardware, abstracted in `hw64.h`:
+
+- **ADS1115** 16-bit I2C ADC (`ads1115.cpp`) for the detector signal and
+  temperature sensors — Linux `i2c-dev`, register-level single-shot reads,
+  configurable PGA full-scale range and data rate.
+- **GPIO lines** (`gpio64.cpp`, Linux gpiochip character device) for the
+  relays/valves/heaters/lamp/pump the legacy `Set_valve()` bits drove.
+- **Simulation backend** (`backend=sim`, works on Windows and Linux):
+  modeled detector signal (incl. a negative peak) and first-order thermal
+  zones, so methods and calibrations can be exercised without hardware.
+  Real hardware (`backend=ads1115`) requires a Linux controller (e.g. a
+  Raspberry Pi wired to the GC).
+
+`acquire64.cpp` runs the legacy sequence: **EQUILIBRATE** (heaters under
+bang-bang hysteresis control, wait for all zones in band) → **SAMPLE**
+(pump + sample/cal valve) → **INJECT** (injection valve + lamp) →
+**ANALYZE** (ADC sampled at `data_rate`, each point fed live to the
+integrator) → **PURGE**. Hardware pins, temperature zones and phase times
+come from the method file (`[hardware]`, `[tempzone]`, `[timing]`).
+
+```sh
+wpeak64_acq -m method.ini monitor -t 30          # watch ADC + temperatures
+wpeak64_acq -m method.ini cal -s 1 -C cal.ini    # run calibration standard 1
+wpeak64_acq -m method.ini run -C cal.ini -o report.csv -D trace.csv
+# --sim / --sim-scale X : force the simulated instrument
+```
+
+## Calibration tables
+
+Multi-standard calibration with the legacy semantics (`CalcConcVars` /
+`Detector::Concentration`): each component holds up to 8 standards; the
+concentration-vs-response curve is piecewise linear through the sorted
+standards, with the segment below the first standard anchored at the
+origin and responses above the last standard extrapolated on the line
+through the origin and that standard. Standard concentrations live in the
+method (`std1=`…`std8=` per `[component]`); measured responses live in a
+calibration file updated by `wpeak64_acq cal -s N` and used by every
+report (`-C cal.ini`, CLI and acquisition alike). Components without a
+calibration table fall back to the fixed `response` factor. Negative
+peaks never calibrate or quantify.
+
 ## What is NOT ported
 
-The Borland OWL GUI (≈40 windows/dialogs), hardware acquisition
-(Measurement Computing USB DAQ, relays, valves, temperature control),
-calibration/component tables, Modbus, TWA/STEL reporting, and file I/O.
-Those layers are tied to Win16/32-era Borland C++ and physical instrument
-hardware; a full port would be a separate project.
+The Borland OWL GUI (≈40 windows/dialogs), Modbus, TWA/STEL reporting,
+and the legacy binary job/method file formats. Those layers are tied to
+Win16/32-era Borland C++; a full port would be a separate project.
 
 ## Programs
 

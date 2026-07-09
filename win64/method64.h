@@ -8,22 +8,36 @@
 #define METHOD64_H
 
 #include "peak64.h"
+#include "hw64.h"
 #include <string>
 #include <vector>
 
 namespace wpeak64 {
+
+enum { STAND_NUM64 = 8 };   // max calibration standards per component
+
+// One calibration point: known standard concentration vs measured response
+// (height or area per detect_meth). Mirrors one column of the legacy
+// CalRes[COMPONENT_ROWS][STAND_NUM] table.
+struct CalPoint {
+    double conc = 0;
+    double resp = 0;
+    bool   valid = false;
+};
 
 // Component (from CMPONENT.H): a named compound expected at a retention time.
 struct Component {
     std::string name;
     double peak_rt   = 0;   // expected retention time, s
     double window    = 0;   // RT match window, +/- s
-    double response  = 0;   // response factor: concentration = response * height|area
-                            // (0 = report "not calibrated")
+    double response  = 0;   // fixed response factor fallback when no
+                            // calibration table exists (0 = "not calibrated")
     bool   active_yn = true;
+    double stand[STAND_NUM64] = {0};      // standard concentrations (std1..std8)
+    CalPoint cal[STAND_NUM64];            // measured calibration table
 };
 
-// Method: detector settings + run parameters + component table.
+// Method: detector settings + run parameters + component table + hardware.
 struct Method {
     DetectorSettings det;
     int    data_rate     = 10;    // points per second
@@ -31,6 +45,10 @@ struct Method {
     int    detect_meth   = 0;     // 0 = height, 1 = area (Detector::detect_meth)
     bool   known_peaks   = false; // report matched (known) peaks only
     std::vector<Component> components;
+
+    HardwareConfig        hw;     // [hardware]
+    std::vector<TempZone> zones;  // [tempzone] sections
+    TimingConfig          timing; // [timing]
 };
 
 // A reported peak: the detected Peak plus identification results.
@@ -78,9 +96,28 @@ bool CheckRT(const Peak &peak, const Component &c, int data_rate);
 
 // PeakMatchup semantics: first active matching component wins; unknown peaks
 // are kept unless method.known_peaks is set. Negative peaks are always kept
-// but never identified/quantified. Concentration = response * height or area
-// per detect_meth, when a response factor is configured.
+// but never identified/quantified. Concentration comes from the component's
+// multipoint calibration table when present (legacy CalcConcVars /
+// Detector::Concentration piecewise-linear interpolation), otherwise from
+// the fixed response factor.
 std::vector<ReportRow> BuildReport(const std::vector<Peak> &peaks, const Method &m);
+
+// Multipoint concentration (piecewise-linear, legacy semantics):
+// points sorted by response; below the first standard and above the last
+// one, the line through the origin and that standard is used. Returns false
+// when the component has no valid calibration points.
+bool ConcentrationFromCal(const Component &c, double response, double &conc);
+
+// ---- Calibration file -------------------------------------------------------
+// INI with one [calibration] section per component:
+//   [calibration]
+//   component=Benzene
+//   std1=1.0,394        ; concentration,measured response
+//   std3=5.0,1980
+// Loads into / saves from Component::cal of a loaded Method (matched by
+// component name; unknown names are an error on load, skipped on save).
+bool LoadCalibration(const std::string &path, Method &m, std::string &err);
+bool SaveCalibration(const std::string &path, const Method &m, std::string &err);
 
 // Write the report as CSV. Returns false and fills err on I/O failure.
 bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,

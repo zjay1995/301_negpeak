@@ -737,12 +737,33 @@ void Integrator::BetweenPeaks( void )
                 return;
             if(pDetector->peak_alg==2)            // peak_alg==2 finds neg. peaks in Data::Set. 06/29/26
                 return;
-            if(analyze_segment != BETWEEN_PEAKS) {// only look when not inside a positive peak
-                neg_start_of_peak = -1;           // abandon any partial negative peak
-                return;
-            }
 
             long depth = act_thresh - scaled_sample; // how far below baseline (>0 = dipping)
+
+            if(analyze_segment != BETWEEN_PEAKS) {// positive machine is inside a peak
+                // The recovery edge of a negative dip can itself trigger the
+                // positive peak start (rising slope with height just above
+                // noise). If that happened while a negative peak was pending
+                // and the signal is already back at the baseline, close the
+                // negative peak instead of discarding it; a dip still in
+                // progress is abandoned as before. 07/09/26
+                if((neg_start_of_peak >= 0)&&(depth <= noise)) {
+                    if(labs(neg_peak_min) >= (long)(pDetector->MinHeight)) {
+                        Peak neg_peak;
+                        neg_peak.Height  = neg_peak_min;
+                        neg_peak._Height = neg_peak_min;
+                        neg_peak.From    = neg_start_of_peak;
+                        neg_peak.To      = raw_data.time;
+                        neg_peak.Time    =
+                        neg_peak._Time   = neg_start_of_peak + (raw_data.time - neg_start_of_peak)/2;
+                        neg_peak._HalfWidth = (raw_data.time - neg_start_of_peak)/2;
+                        neg_peak.multiplier = (int) cur_autoscale;
+                        pPeakList->append(neg_peak);
+                    }
+                }
+                neg_start_of_peak = -1;           // abandon any dip still in progress
+                return;
+            }
 
             if(depth > noise) {                   // signal is below baseline by > noise
                 if(neg_start_of_peak < 0) {       // start of a new negative peak
