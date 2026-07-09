@@ -211,6 +211,11 @@ class Integrator: public RawData {
   int analyze_segment;
   //int peakX, peakY;
 
+  // negative-peak detection state for the production state machine
+  // (peak_alg 0/1). Detection only - see DetectNegativePeak(). 06/29/26
+  long neg_start_of_peak;  // ret. time when current neg. peak began (-1 = none)
+  long neg_peak_min;       // most negative height (<=0) seen in current neg. peak
+
   Peak peak;	// current peak
   PeakList *pPeakList;
 
@@ -238,6 +243,7 @@ class Integrator: public RawData {
   void NewPeakRising( void );
   void NewPeak( void );
   void PeakDescending( void );
+  void DetectNegativePeak( void ); // neg. peak detection in main algorithm. 06/29/26
   int EndOfPeak( );
   int PeakMatchup( void );
   int PeakMatchup( Peak *pPeak, int bPreliminary );

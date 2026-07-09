@@ -208,6 +208,8 @@ Integrator::Integrator(Method *_pMethod, Detector *_pDetector, Run *_pRun,
          prev_retention_time  (0l)
 {
 //  ext_det_done = 0; // rem P.P. 05/13/11
+    neg_start_of_peak = -1;  // no negative peak in progress. 06/29/26
+    neg_peak_min = 0;        // 06/29/26
     peak.Num=0;              // no peaks yet
     concen_total = 0; // added. P.P. 09/23/03
     CalcConcVars(pDetector, cal_results/*///???, comp_slope*/);
@@ -327,6 +329,11 @@ int Integrator::DetectPeaks( void )
             flags=EndOfPeak( );
             break;
     }
+
+    // Detection-only negative-peak finder for the production state machine
+    // (peak_alg 0/1). Runs alongside the positive state machine. 06/29/26
+    if(dq.IsSampleFinished())
+        DetectNegativePeak();
 
     prev_raw_unit = raw_sample;
     prev_scaled_sample = scaled_sample;
@@ -714,6 +721,58 @@ void Integrator::BetweenPeaks( void )
                 analyze_segment = STILL_DESCENDING;
             }
         }
+
+        // Detection-only negative-peak finder for the production state machine
+        // (peak_alg 0/1). Mirrors the negative-peak logic of the peak_alg==2
+        // curve-fit path (see Data::Set in this file): it watches for the signal
+        // dipping below the baseline by more than the noise level, tracks the
+        // most negative point, and on recovery appends a peak with a NEGATIVE
+        // Height. Negative Height (and the default Num) keep the peak excluded
+        // from area / height / concentration calculations and from the numbered
+        // report table (see the Height>0 / Num>0 guards in PEAK_WND.CPP), so the
+        // peak is shown/marked but not quantified. 06/29/26
+        void Integrator::DetectNegativePeak( void )
+        {
+            if(pDetector->ext_det)                // regular detectors only. 06/29/26
+                return;
+            if(pDetector->peak_alg==2)            // peak_alg==2 finds neg. peaks in Data::Set. 06/29/26
+                return;
+            if(analyze_segment != BETWEEN_PEAKS) {// only look when not inside a positive peak
+                neg_start_of_peak = -1;           // abandon any partial negative peak
+                return;
+            }
+
+            long depth = act_thresh - scaled_sample; // how far below baseline (>0 = dipping)
+
+            if(depth > noise) {                   // signal is below baseline by > noise
+                if(neg_start_of_peak < 0) {       // start of a new negative peak
+                    neg_start_of_peak = raw_data.time;
+                    neg_peak_min = 0;
+                }
+                long h = scaled_sample - act_thresh; // negative height
+                if(h < neg_peak_min)
+                    neg_peak_min = h;             // keep the most negative point
+            }
+            else if(neg_start_of_peak >= 0) {     // negative peak just ended
+                // ignore noise-sized dips, same MinHeight gate used for positive peaks
+                if(labs(neg_peak_min) >= (long)(pDetector->MinHeight)) {
+                    Peak neg_peak;               // separate from member 'peak'
+                    neg_peak.Height  = neg_peak_min;   // negative -> excluded from quant.
+                    neg_peak._Height = neg_peak_min;
+                    neg_peak.From    = neg_start_of_peak;
+                    neg_peak.To      = raw_data.time;
+                    neg_peak.Time    =
+                    neg_peak._Time   = neg_start_of_peak + (raw_data.time - neg_start_of_peak)/2;
+                    neg_peak._HalfWidth = (raw_data.time - neg_start_of_peak)/2;
+                    neg_peak.multiplier = (int) cur_autoscale;
+                    // Num left at its default so the peak is not numbered/quantified,
+                    // only drawn. PeakMatchup() is deliberately not called. 06/29/26
+                    pPeakList->append(neg_peak);
+                }
+                neg_start_of_peak = -1;
+            }
+        }
+
 
         int Integrator::EndOfPeak()
         {
