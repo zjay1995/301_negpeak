@@ -62,6 +62,7 @@ struct HardwareConfig {
     int pump         = -1;
     int lamp         = -1;
     int fan          = -1;
+    int autozero     = -1;   // detector autozero command (legacy AutoZero bit)
     // multipoint manifold: one point-select valve per sample point
     // (legacy POINTS(); empty = single point on sample_valve)
     std::vector<int> point_valves;
@@ -88,6 +89,7 @@ struct TempZone {
 // Run phase timing (legacy method_table times), seconds.
 struct TimingConfig {
     long equil_time  = 5;    // wait for temperature zones in band
+    long autozero_time = 0;  // s: energize the autozero line after equil (0 = skip)
     long sample_time = 10;   // sample pump/valve on
     long inject_time = 5;    // injection valve energized
     long purge_time  = 10;   // post-run purge

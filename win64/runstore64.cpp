@@ -134,4 +134,33 @@ bool LoadRunList(const std::string &jobdir, std::vector<RunRecord> &out,
     return true;
 }
 
+bool LoadRunConcentrations(const std::string &jobdir, const RunRecord &rec,
+                           std::vector<std::pair<std::string,double>> &out,
+                           std::string &err)
+{
+    out.clear();
+    std::string path = jobdir + "/" + rec.dir + "/report.csv";
+    std::ifstream f(path);
+    if(!f) { err = "cannot open " + path; return false; }
+    std::string line;
+    while(std::getline(f, line)) {
+        if(line.empty() || line[0] == '#' || line.compare(0, 4, "num,") == 0)
+            continue;
+        // num,component,rt_s,height,area,from_s,to_s,concentration,type,alarm
+        std::string fields[10];
+        size_t pos = 0;
+        for(int i = 0; i < 10; i++) {
+            size_t comma = line.find(',', pos);
+            fields[i] = line.substr(pos, comma == std::string::npos
+                                         ? std::string::npos : comma - pos);
+            if(comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+        if(fields[8] != "positive" || fields[7].empty())
+            continue;                      // uncalibrated or negative peak
+        out.push_back({ fields[1], std::atof(fields[7].c_str()) });
+    }
+    return true;
+}
+
 } // namespace wpeak64

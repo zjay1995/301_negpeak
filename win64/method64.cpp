@@ -112,6 +112,7 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "pump")         h.pump         = std::atoi(val.c_str());
             else if(key == "lamp")         h.lamp         = std::atoi(val.c_str());
             else if(key == "fan")          h.fan          = std::atoi(val.c_str());
+            else if(key == "autozero")     h.autozero     = std::atoi(val.c_str());
             else if(key == "alarm_high_line") h.alarm_high_line = std::atoi(val.c_str());
             else if(key == "alarm_low_line")  h.alarm_low_line  = std::atoi(val.c_str());
             else if(key == "point_valves") {   // comma-separated GPIO line list
@@ -136,6 +137,7 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
         }
         else if(section == "timing") {
             if     (key == "equil_time")  m.timing.equil_time  = std::atol(val.c_str());
+            else if(key == "autozero_time") m.timing.autozero_time = std::atol(val.c_str());
             else if(key == "sample_time") m.timing.sample_time = std::atol(val.c_str());
             else if(key == "inject_time") m.timing.inject_time = std::atol(val.c_str());
             else if(key == "purge_time")  m.timing.purge_time  = std::atol(val.c_str());

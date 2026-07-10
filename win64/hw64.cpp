@@ -115,7 +115,7 @@ bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
 
         std::vector<int> lines = {
             hw.sample_valve, hw.inject_valve, hw.cal_valve, hw.purge_valve,
-            hw.pump, hw.lamp, hw.fan,
+            hw.pump, hw.lamp, hw.fan, hw.autozero,
             hw.alarm_high_line, hw.alarm_low_line,
         };
         for(int pv : hw.point_valves)

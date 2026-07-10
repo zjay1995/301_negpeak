@@ -64,8 +64,21 @@ wpeak64_acq -m method.ini cal -s 1 -C cal.ini    # run calibration standard 1
 wpeak64_acq -m method.ini run -p 2 -C cal.ini -j jobdir   # one run, point 2
 wpeak64_acq -m method.ini continuous -C cal.ini -j jobdir # scheduled operation
 wpeak64_acq history -j jobdir                    # print the run history
+wpeak64_acq twa -j jobdir                        # TWA / STEL exposure report
 # --sim / --sim-scale X : force the simulated instrument
 ```
+
+An optional detector **autozero** (legacy `Acquire::AutoZero`) runs between
+equilibration and sampling: set `autozero=<gpio>` in `[hardware]` and
+`autozero_time=<s>` in `[timing]`.
+
+## TWA / STEL
+
+`wpeak64_acq twa -j jobdir` computes the exposure report over the stored
+run history (legacy `TWA_results` / `STEL_results`): per sample point and
+component the time-weighted average (mean over runs), min/max, and STEL —
+the highest mean over any window of up to 15 consecutive runs (legacy
+`STEL_RUNS`). Calibration runs are excluded.
 
 ## Run persistence & history
 

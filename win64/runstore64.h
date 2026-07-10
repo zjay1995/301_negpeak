@@ -48,6 +48,12 @@ bool SaveRun(const std::string &jobdir, const Method &m,
 bool LoadRunList(const std::string &jobdir, std::vector<RunRecord> &out,
                  std::string &err);
 
+// Parse a stored run's report.csv into (component, concentration) pairs --
+// calibrated positive peaks only. Used by the TWA/STEL calculation.
+bool LoadRunConcentrations(const std::string &jobdir, const RunRecord &rec,
+                           std::vector<std::pair<std::string,double>> &out,
+                           std::string &err);
+
 } // namespace wpeak64
 
 #endif // RUNSTORE64_H

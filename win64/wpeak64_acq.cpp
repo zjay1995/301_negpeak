@@ -18,6 +18,11 @@
 //               (0 = until interrupted).
 //   monitor     print ADC channels, zone temperatures and output states
 //   history     print the run list of a job directory
+//   twa         TWA / STEL exposure report over a job directory's stored
+//               runs (legacy TWA_results / STEL_results): per point and
+//               component the time-weighted average (mean over runs),
+//               min/max, and STEL = highest mean over any window of up to
+//               15 consecutive runs (legacy STEL_RUNS)
 //
 //   -m  method file   -C calibration file   -j job directory (run persistence)
 //   -p  sample point number (multipoint manifold; default 1)
@@ -177,6 +182,56 @@ int main(int argc, char **argv)
         }
     }
 
+    if(mode == "twa") {
+        if(jobdir.empty()) { std::fprintf(stderr, "twa requires -j jobdir\n"); return 2; }
+        std::vector<RunRecord> hist;
+        std::string err;
+        if(!LoadRunList(jobdir, hist, err)) {
+            std::fprintf(stderr, "error: %s\n", err.c_str());
+            return 2;
+        }
+        // per (point, component): concentrations in run order
+        struct Series { int point; std::string comp; std::vector<double> concs; };
+        std::vector<Series> series;
+        for(const RunRecord &r : hist) {
+            if(r.type != "run") continue;            // cal runs excluded
+            std::vector<std::pair<std::string,double>> concs;
+            if(!LoadRunConcentrations(jobdir, r, concs, err)) {
+                std::fprintf(stderr, "warning: %s\n", err.c_str());
+                continue;
+            }
+            for(auto &pc : concs) {
+                Series *s = nullptr;
+                for(auto &e : series)
+                    if(e.point == r.point && e.comp == pc.first) s = &e;
+                if(!s) { series.push_back({ r.point, pc.first, {} }); s = &series.back(); }
+                s->concs.push_back(pc.second);
+            }
+        }
+        const int STEL_RUNS64 = 15;                  // legacy STEL_RUNS
+        std::printf("TWA / STEL exposure report -- %s\n", jobdir.c_str());
+        std::printf("%-6s %-14s %-6s %-10s %-10s %-10s %-10s\n",
+                    "Point", "Component", "Runs", "TWA", "Min", "Max", "STEL");
+        for(const Series &s : series) {
+            double sum = 0, mn = s.concs[0], mx = s.concs[0];
+            for(double c : s.concs) { sum += c; if(c < mn) mn = c; if(c > mx) mx = c; }
+            double twa = sum / s.concs.size();
+            int w = (int)s.concs.size() < STEL_RUNS64 ? (int)s.concs.size() : STEL_RUNS64;
+            double stel = 0;
+            for(size_t i = 0; i + w <= s.concs.size(); i++) {
+                double ws = 0;
+                for(int k = 0; k < w; k++) ws += s.concs[i + k];
+                ws /= w;
+                if(ws > stel) stel = ws;
+            }
+            std::printf("%-6d %-14s %-6zu %-10.4g %-10.4g %-10.4g %-10.4g\n",
+                        s.point, s.comp.c_str(), s.concs.size(), twa, mn, mx, stel);
+        }
+        if(series.empty())
+            std::printf("(no calibrated run data in %s)\n", jobdir.c_str());
+        return 0;
+    }
+
     if(mode == "history") {
         if(jobdir.empty()) { std::fprintf(stderr, "history requires -j jobdir\n"); return 2; }
         std::vector<RunRecord> hist;
@@ -202,7 +257,7 @@ int main(int argc, char **argv)
     if(method_path.empty() || !valid_mode) {
         std::fprintf(stderr,
             "usage: %s -m method.ini run|cal|continuous|monitor [options]\n"
-            "       %s history -j jobdir\n"
+            "       %s history|twa -j jobdir\n"
             "  run         [-p point] [-C cal.ini] [-j jobdir] [-o report.csv] [-D trace.csv]\n"
             "  cal         -s N [-C cal.ini] [-j jobdir]    (N = standard 1..%d)\n"
             "  continuous  [-C cal.ini] [-j jobdir] [-n maxruns]\n"

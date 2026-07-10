@@ -47,6 +47,51 @@ static std::string            g_cal_path;     // calibration file (optional)
 static HWND g_main = nullptr, g_acqwnd = nullptr, g_elemwnd = nullptr;
 static bool g_autorun = false;   // /autorun: open windows + start a run at launch
 
+// ---- modern industrial style -------------------------------------------------
+// Segoe UI for labels/headers (falls back to Tahoma/Arial where missing),
+// Consolas for tabular numeric data; charcoal header strip per window.
+static HFONT g_font_ui = nullptr, g_font_ui_bold = nullptr, g_font_mono = nullptr;
+static const COLORREF kHeaderBg   = RGB(38, 42, 48);    // charcoal
+static const COLORREF kHeaderFg   = RGB(235, 238, 240);
+static const COLORREF kAccent     = RGB(0, 120, 155);   // industrial teal
+static const COLORREF kAlarmRed   = RGB(198, 40, 40);
+static const COLORREF kNegOrange  = RGB(198, 110, 0);
+static const COLORREF kTraceBlue  = RGB(20, 90, 180);
+static const COLORREF kBaseGreen  = RGB(0, 140, 70);
+static const COLORREF kGridGray   = RGB(120, 126, 132);
+
+static void CreateFonts()
+{
+    g_font_ui = CreateFontA(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, "Segoe UI");
+    g_font_ui_bold = CreateFontA(-16, 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+                            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, "Segoe UI");
+    g_font_mono = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+}
+
+// charcoal strip with a white title and teal accent line; returns content top
+static int DrawHeaderStrip(HDC dc, const RECT &rc, const char *title)
+{
+    RECT strip = rc; strip.bottom = strip.top + 36;
+    HBRUSH bg = CreateSolidBrush(kHeaderBg);
+    FillRect(dc, &strip, bg);
+    DeleteObject(bg);
+    RECT accent = strip; accent.top = strip.bottom; accent.bottom = strip.bottom + 3;
+    HBRUSH ab = CreateSolidBrush(kAccent);
+    FillRect(dc, &accent, ab);
+    DeleteObject(ab);
+    HGDIOBJ old = SelectObject(dc, g_font_ui_bold);
+    SetTextColor(dc, kHeaderFg);
+    TextOutA(dc, rc.left + 16, strip.top + 8, title, (int)strlen(title));
+    SelectObject(dc, old);
+    SetTextColor(dc, RGB(0,0,0));
+    return strip.bottom + 3;
+}
+
 // ---- shared state between the acquisition thread and the windows ------------
 struct AcqShared {
     CRITICAL_SECTION cs;
@@ -211,8 +256,9 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
     auto X = [&](double i) { return plot.left + (int)((double)(plot.right - plot.left) * i / (n - 1)); };
     auto Y = [&](double v) { return plot.bottom - (int)((double)(plot.bottom - plot.top) * (v - ymin) / yspan); };
 
-    HPEN frame = CreatePen(PS_SOLID, 1, RGB(120,120,120));
+    HPEN frame = CreatePen(PS_SOLID, 1, kGridGray);
     HGDIOBJ oldPen = SelectObject(dc, frame);
+    HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
     Rectangle(dc, plot.left, plot.top, plot.right, plot.bottom);
 
     long total_s = n / data_rate;
@@ -221,11 +267,13 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
         int x = X((double)s * data_rate);
         MoveToEx(dc, x, plot.bottom, nullptr); LineTo(dc, x, plot.bottom + 5);
         char lbl[16]; int len = std::snprintf(lbl, sizeof lbl, "%lds", s);
+        SetTextColor(dc, kGridGray);
         TextOutA(dc, x - 8, plot.bottom + 8, lbl, len);
     }
+    SetTextColor(dc, RGB(0,0,0));
 
     if(baseline) {
-        HPEN basePen = CreatePen(PS_DOT, 1, RGB(0,150,0));
+        HPEN basePen = CreatePen(PS_DOT, 1, kBaseGreen);
         SelectObject(dc, basePen);
         MoveToEx(dc, plot.left, Y((double)baseline), nullptr);
         LineTo(dc, plot.right, Y((double)baseline));
@@ -233,15 +281,16 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
         DeleteObject(basePen);
     }
 
-    HPEN tracePen = CreatePen(PS_SOLID, 1, RGB(0,0,200));
+    HPEN tracePen = CreatePen(PS_SOLID, 1, kTraceBlue);
     SelectObject(dc, tracePen);
     MoveToEx(dc, X(0), Y((double)trace[0]), nullptr);
     for(long i = 1; i < n; i++)
         LineTo(dc, X((double)i), Y((double)trace[(size_t)i]));
 
     if(rows) {
-        HPEN posPen = CreatePen(PS_SOLID, 2, RGB(200,0,0));
-        HPEN negPen = CreatePen(PS_SOLID, 2, RGB(200,120,0));
+        HPEN posPen = CreatePen(PS_SOLID, 2, kAlarmRed);
+        HPEN negPen = CreatePen(PS_SOLID, 2, kNegOrange);
+        SelectObject(dc, g_font_ui);
         for(const ReportRow &r : *rows) {
             const Peak &p = r.peak;
             bool neg = p.Height < 0;
@@ -254,7 +303,7 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
 
             int yap = Y((double)(baseline + p.Height));
             char lbl[64]; int len;
-            SetTextColor(dc, neg ? RGB(200,120,0) : RGB(200,0,0));
+            SetTextColor(dc, neg ? kNegOrange : kAlarmRed);
             if(neg) {
                 len = std::snprintf(lbl, sizeof lbl, "NEG");
                 TextOutA(dc, xm - 12, yap + 6, lbl, len);
@@ -264,7 +313,7 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
                 TextOutA(dc, xm - 4, yap - 18, lbl, len);
                 if(r.component >= 0) {
                     len = (int)r.name.size();
-                    TextOutA(dc, xm - 4 * len, yap - 34, r.name.c_str(), len);
+                    TextOutA(dc, xm - 4 * len, yap - 36, r.name.c_str(), len);
                 }
             }
         }
@@ -272,34 +321,36 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
         DeleteObject(posPen); DeleteObject(negPen);
     }
     SelectObject(dc, oldPen);
+    SelectObject(dc, oldFont);
     DeleteObject(frame); DeleteObject(tracePen);
 }
 
 // ---- main window --------------------------------------------------------------
 static void PaintMain(HDC dc, const RECT &rc)
 {
-    const int tableW = 400;
-    RECT plot = rc;
-    plot.left += 50; plot.right -= tableW + 10; plot.top += 40; plot.bottom -= 40;
     FillRect(dc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    SetBkMode(dc, TRANSPARENT);
+    int top = DrawHeaderStrip(dc, rc, "GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64");
+
+    const int tableW = 420;
+    RECT plot = rc;
+    plot.left += 50; plot.right -= tableW + 10; plot.top = top + 16; plot.bottom -= 40;
     if(plot.right - plot.left < 50 || plot.bottom - plot.top < 50) return;
     if(g_trace.empty()) return;
-    SetBkMode(dc, TRANSPARENT);
 
-    {
-        const char *hdr = "GC301c Gas Chromatograph - WPEAK64 (64-bit port)";
-        TextOutA(dc, plot.left, 10, hdr, (int)strlen(hdr));
-    }
     PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
 
     int tx = plot.right + 20, ty = plot.top;
     char line[160]; int len;
-    len = std::snprintf(line, sizeof line, "Noise=%ld  Baseline=%ld  (%s method)",
+    HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
+    len = std::snprintf(line, sizeof line, "Noise %ld    Baseline %ld    %s method",
                         g_noise, g_baseline,
                         g_method.detect_meth == 0 ? "height" : "area");
-    TextOutA(dc, tx, ty, line, len); ty += 24;
+    TextOutA(dc, tx, ty, line, len); ty += 26;
+    SelectObject(dc, g_font_mono);
     len = std::snprintf(line, sizeof line, "Num  Component     RT(s)  Height   Conc.   Alarm");
-    TextOutA(dc, tx, ty, line, len); ty += 18;
+    SetTextColor(dc, kGridGray);
+    TextOutA(dc, tx, ty, line, len); ty += 20;
     for(const ReportRow &r : g_rows) {
         const Peak &p = r.peak;
         bool neg = p.Height < 0;
@@ -316,10 +367,11 @@ static void PaintMain(HDC dc, const RECT &rc)
             len = std::snprintf(line, sizeof line, "%-4d %-12s %5.1f  %7ld  %-7s %s",
                                 p.Num, r.name.c_str(), (double)p.Time / g_method.data_rate,
                                 p.Height, conc, alarm);
-        SetTextColor(dc, r.alarm ? RGB(200,0,0) : neg ? RGB(200,120,0) : RGB(0,0,0));
-        TextOutA(dc, tx, ty, line, len); ty += 18;
+        SetTextColor(dc, r.alarm ? kAlarmRed : neg ? kNegOrange : RGB(30,32,34));
+        TextOutA(dc, tx, ty, line, len); ty += 19;
     }
     SetTextColor(dc, RGB(0,0,0));
+    SelectObject(dc, oldFont);
 }
 
 // ---- acquisition window ---------------------------------------------------------
@@ -336,31 +388,44 @@ static void PaintAcq(HDC dc, const RECT &rc)
     bool is_cal = g_acq.is_cal;
     LeaveCriticalSection(&g_acq.cs);
 
-    char line[200]; int len;
-    len = std::snprintf(line, sizeof line, "Acquisition: %s%s   Phase: %s",
-                        is_cal ? "CALIBRATION" : "RUN",
-                        running ? " (in progress)" : " (idle)",
-                        phase.empty() ? "-" : phase.c_str());
-    TextOutA(dc, 20, 15, line, len);
+    char hdr[120];
+    std::snprintf(hdr, sizeof hdr, "ACQUISITION  \xb7  %s %s",
+                  is_cal ? "CALIBRATION" : "RUN",
+                  running ? "IN PROGRESS" : "IDLE");
+    int top = DrawHeaderStrip(dc, rc, hdr);
 
-    int tx = 20, ty = 40;
+    char line[200]; int len;
+    HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
+    int tx = 20, ty = top + 10;
+    len = std::snprintf(line, sizeof line, "Phase: %s",
+                        phase.empty() ? "-" : phase.c_str());
+    SetTextColor(dc, kAccent);
+    TextOutA(dc, tx, ty, line, len);
+    tx += 200;
+    SetTextColor(dc, RGB(30,32,34));
     for(auto &z : zones) {
-        len = std::snprintf(line, sizeof line, "%s = %.1f C", z.first.c_str(), z.second);
+        len = std::snprintf(line, sizeof line, "%s  %.1f \xb0""C", z.first.c_str(), z.second);
         TextOutA(dc, tx, ty, line, len);
         tx += 160;
     }
-    len = std::snprintf(line, sizeof line, "points acquired: %zu", live.size());
+    len = std::snprintf(line, sizeof line, "points: %zu", live.size());
     TextOutA(dc, tx, ty, line, len);
+    SetTextColor(dc, RGB(0,0,0));
+    SelectObject(dc, oldFont);
 
     RECT plot = rc;
-    plot.left += 50; plot.right -= 30; plot.top += 80; plot.bottom -= 40;
+    plot.left += 50; plot.right -= 30; plot.top = top + 44; plot.bottom -= 40;
     if(plot.right - plot.left < 50 || plot.bottom - plot.top < 50) return;
     int data_rate = g_method.data_rate > 0 ? g_method.data_rate : 10;
     if(live.size() >= 2)
         PaintTrace(dc, plot, live, 0, nullptr, data_rate);
     else {
+        oldFont = SelectObject(dc, g_font_ui);
+        SetTextColor(dc, kGridGray);
         const char *w = "waiting for the ANALYZE phase...";
         TextOutA(dc, plot.left, plot.top, w, (int)strlen(w));
+        SetTextColor(dc, RGB(0,0,0));
+        SelectObject(dc, oldFont);
     }
 }
 
@@ -370,19 +435,21 @@ static void PaintElem(HDC dc, const RECT &rc)
     FillRect(dc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
     SetBkMode(dc, TRANSPARENT);
 
-    char line[240]; int len;
-    len = std::snprintf(line, sizeof line,
-        "Element / component table  (%zu components, %s method)",
-        g_method.components.size(),
-        g_method.detect_meth == 0 ? "height" : "area");
-    TextOutA(dc, 20, 15, line, len);
+    char hdr[120];
+    std::snprintf(hdr, sizeof hdr, "ELEMENT TABLE  \xb7  %zu COMPONENTS  \xb7  %s METHOD",
+                  g_method.components.size(),
+                  g_method.detect_meth == 0 ? "HEIGHT" : "AREA");
+    int top = DrawHeaderStrip(dc, rc, hdr);
 
-    int ty = 45;
+    char line[240]; int len;
+    HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
+    int ty = top + 12;
     len = std::snprintf(line, sizeof line,
         "%-14s %-7s %-7s %-9s %-8s %-8s %-24s %-10s %s",
         "Component", "RT(s)", "Win(s)", "RespFact", "AlarmHi", "AlarmLo",
         "Calibration (conc@resp)", "LastConc", "Alarm");
-    TextOutA(dc, 20, ty, line, len); ty += 20;
+    SetTextColor(dc, kGridGray);
+    TextOutA(dc, 20, ty, line, len); ty += 22;
 
     for(size_t i = 0; i < g_method.components.size(); i++) {
         const Component &c = g_method.components[i];
@@ -410,17 +477,20 @@ static void PaintElem(HDC dc, const RECT &rc)
             "%-14s %-7g %-7g %-9g %-8g %-8g %-24s %-10s %s",
             c.name.c_str(), c.peak_rt, c.window, c.response,
             c.alarm_high, c.alarm_low, cal, conc, alarm);
-        SetTextColor(dc, (last && last->alarm) ? RGB(200,0,0)
-                         : c.active_yn ? RGB(0,0,0) : RGB(150,150,150));
-        TextOutA(dc, 20, ty, line, len); ty += 18;
+        SetTextColor(dc, (last && last->alarm) ? kAlarmRed
+                         : c.active_yn ? RGB(30,32,34) : kGridGray);
+        TextOutA(dc, 20, ty, line, len); ty += 19;
     }
-    SetTextColor(dc, RGB(0,0,0));
+    SetTextColor(dc, kGridGray);
 
-    ty += 10;
+    ty += 12;
+    SelectObject(dc, g_font_ui);
     len = std::snprintf(line, sizeof line,
-        "Standards (method): std1..std%d per component; calibrate with Run > Start Calibration",
+        "Standards (method): std1..std%d per component \xb7 calibrate with Run > Start Calibration",
         STAND_NUM64);
     TextOutA(dc, 20, ty, line, len);
+    SetTextColor(dc, RGB(0,0,0));
+    SelectObject(dc, oldFont);
 }
 
 // ---- window procedures -----------------------------------------------------------
@@ -432,8 +502,7 @@ static void DoubleBufferPaint(HWND hwnd, void (*painter)(HDC, const RECT &))
     HDC mem = CreateCompatibleDC(dc);
     HBITMAP bmp = CreateCompatibleBitmap(dc, rc.right, rc.bottom);
     HGDIOBJ old = SelectObject(mem, bmp);
-    HFONT font = (HFONT)GetStockObject(ANSI_FIXED_FONT);
-    HGDIOBJ oldFont = SelectObject(mem, font);
+    HGDIOBJ oldFont = SelectObject(mem, g_font_ui);
     painter(mem, rc);
     SelectObject(mem, oldFont);
     BitBlt(dc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
@@ -626,6 +695,7 @@ static void ParseCmdLine(LPSTR cmd)
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
 {
     InitializeCriticalSection(&g_acq.cs);
+    CreateFonts();
     ParseCmdLine(lpCmdLine);
     std::string err;
     if(!RunAnalysis(nullptr, err)) {

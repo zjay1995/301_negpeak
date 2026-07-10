@@ -60,7 +60,7 @@ void AcquireRun::AllOff()
     // in-limit concentrations updates them.
     const HardwareConfig &hw = m_.hw;
     int lines[] = { hw.sample_valve, hw.inject_valve, hw.cal_valve,
-                    hw.purge_valve, hw.pump, hw.lamp, hw.fan };
+                    hw.purge_valve, hw.pump, hw.lamp, hw.fan, hw.autozero };
     for(int l : lines)
         if(l >= 0) h_.out->Set(l, false);
     for(int pv : hw.point_valves)
@@ -120,6 +120,19 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
     }
 
     if(aborted()) return false;
+
+    // --- AUTOZERO --- (legacy Acquire::AutoZero: pulse the detector's
+    // autozero command once temperatures are stable, before sampling)
+    if(hw.autozero >= 0 && m_.timing.autozero_time > 0) {
+        phase("AUTOZERO");
+        h_.out->Set(hw.autozero, true);
+        for(double t = 0; t < (double)m_.timing.autozero_time; t += tick) {
+            ServiceTempZones();
+            Tick(tick);
+        }
+        h_.out->Set(hw.autozero, false);
+        if(aborted()) return false;
+    }
 
     // --- SAMPLE --- (cal valve replaces the sample intake for a calibration
     // run; with a point-valve manifold the selected point valve is used)
