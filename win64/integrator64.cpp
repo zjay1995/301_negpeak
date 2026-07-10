@@ -292,6 +292,7 @@ void Integrator::DetectNegativePeak()
             if(std::labs(neg_peak_min) >= det.MinHeight) {
                 Peak neg_peak;
                 neg_peak.Height = neg_peak_min;
+                neg_peak.Area   = neg_peak_area;   // negative area, display only
                 neg_peak.From   = neg_start_of_peak;
                 neg_peak.To     = raw_time;
                 neg_peak.Time   = neg_start_of_peak + (raw_time - neg_start_of_peak) / 2;
@@ -306,15 +307,18 @@ void Integrator::DetectNegativePeak()
         if(neg_start_of_peak < 0) {          // start of a new negative peak
             neg_start_of_peak = raw_time;
             neg_peak_min = 0;
+            neg_peak_area = 0;
         }
         long h = scaled_sample - act_thresh; // negative height
         if(h < neg_peak_min)
             neg_peak_min = h;                // keep the most negative point
+        neg_peak_area += (double)h * dq.segment_width;  // trap. rule, as positives
     }
     else if(neg_start_of_peak >= 0) {        // negative peak just ended
         if(std::labs(neg_peak_min) >= det.MinHeight) { // ignore noise-sized dips
             Peak neg_peak;
             neg_peak.Height = neg_peak_min;  // negative -> excluded from quant.
+            neg_peak.Area   = neg_peak_area; // negative area, display only
             neg_peak.From   = neg_start_of_peak;
             neg_peak.To     = raw_time;
             neg_peak.Time   = neg_start_of_peak + (raw_time - neg_start_of_peak) / 2;

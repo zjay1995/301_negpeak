@@ -210,6 +210,7 @@ Integrator::Integrator(Method *_pMethod, Detector *_pDetector, Run *_pRun,
 //  ext_det_done = 0; // rem P.P. 05/13/11
     neg_start_of_peak = -1;  // no negative peak in progress. 06/29/26
     neg_peak_min = 0;        // 06/29/26
+    neg_peak_area = 0;       // 07/10/26
     peak.Num=0;              // no peaks yet
     concen_total = 0; // added. P.P. 09/23/03
     CalcConcVars(pDetector, cal_results/*///???, comp_slope*/);
@@ -752,6 +753,7 @@ void Integrator::BetweenPeaks( void )
                         Peak neg_peak;
                         neg_peak.Height  = neg_peak_min;
                         neg_peak._Height = neg_peak_min;
+                        neg_peak.Area    = neg_peak_area; // negative area, display only. 07/10/26
                         neg_peak.From    = neg_start_of_peak;
                         neg_peak.To      = raw_data.time;
                         neg_peak.Time    =
@@ -769,10 +771,12 @@ void Integrator::BetweenPeaks( void )
                 if(neg_start_of_peak < 0) {       // start of a new negative peak
                     neg_start_of_peak = raw_data.time;
                     neg_peak_min = 0;
+                    neg_peak_area = 0;            // 07/10/26
                 }
                 long h = scaled_sample - act_thresh; // negative height
                 if(h < neg_peak_min)
                     neg_peak_min = h;             // keep the most negative point
+                neg_peak_area += (double)h * dq.segment_width; // trap. rule, as positives. 07/10/26
             }
             else if(neg_start_of_peak >= 0) {     // negative peak just ended
                 // ignore noise-sized dips, same MinHeight gate used for positive peaks
@@ -780,6 +784,7 @@ void Integrator::BetweenPeaks( void )
                     Peak neg_peak;               // separate from member 'peak'
                     neg_peak.Height  = neg_peak_min;   // negative -> excluded from quant.
                     neg_peak._Height = neg_peak_min;
+                    neg_peak.Area    = neg_peak_area;  // negative area, display only. 07/10/26
                     neg_peak.From    = neg_start_of_peak;
                     neg_peak.To      = raw_data.time;
                     neg_peak.Time    =

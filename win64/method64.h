@@ -89,6 +89,11 @@ struct ReportRow {
 // Returns false and fills err on parse failure.
 bool LoadMethod(const std::string &path, Method &m, std::string &err);
 
+// Write a Method back to the INI format LoadMethod reads (all sections:
+// detector, components, hardware, tempzones, timing). Calibration data is
+// NOT written here -- it lives in the calibration file (SaveCalibration).
+bool SaveMethod(const std::string &path, const Method &m, std::string &err);
+
 // ---- Chromatogram CSV -------------------------------------------------------
 // Accepts one sample per line: either "value" or "time,value" (time ignored --
 // the method's data_rate defines timing, as in the original raw data files).

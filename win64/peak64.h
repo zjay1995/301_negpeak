@@ -110,8 +110,9 @@ public:
     long   scaled_sample = 0, raw_sample = 0;
 
     // negative-peak detection state (added to the main algorithm, 06/29/26)
-    long neg_start_of_peak = -1;
-    long neg_peak_min      = 0;
+    long   neg_start_of_peak = -1;
+    long   neg_peak_min      = 0;
+    double neg_peak_area     = 0;   // accumulated (negative) area under baseline
 
     Peak peak;                        // current (positive) peak being built
     std::vector<Peak> peaks;          // detected peaks (replaces PeakList)

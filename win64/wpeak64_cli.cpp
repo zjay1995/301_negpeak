@@ -92,7 +92,7 @@ int main(int argc, char **argv)
                     num, r.name.c_str(),
                     (double)p.Time / m.data_rate,
                     p.Height,
-                    neg ? 0.0 : p.Area,
+                    p.Area,
                     (double)p.From / m.data_rate,
                     (double)p.To   / m.data_rate,
                     conc,

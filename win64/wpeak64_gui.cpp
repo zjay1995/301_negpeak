@@ -30,9 +30,11 @@ using namespace wpeak64;
 
 enum {
     IDM_OPEN_DATA = 101, IDM_OPEN_METHOD = 102, IDM_EXPORT = 103,
-    IDM_EXIT = 104, IDM_OPEN_CAL = 105,
+    IDM_EXIT = 104, IDM_OPEN_CAL = 105, IDM_SAVE_METHOD = 106,
     IDM_RUN_START = 201, IDM_RUN_CAL = 202, IDM_RUN_ABORT = 203,
-    IDM_WIN_ACQ = 301, IDM_WIN_ELEM = 302,
+    IDM_WIN_ACQ = 301, IDM_WIN_ELEM = 302, IDM_CLOSE_WIN = 303,
+    IDM_ABOUT = 401, IDM_SETTINGS = 501,
+    IDC_SET_OK = 601, IDC_SET_CANCEL = 602,
 };
 static const UINT WM_ACQ_DONE = WM_APP + 1;
 
@@ -71,6 +73,48 @@ static void CreateFonts()
     g_font_mono = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+}
+
+// bottom status bar: charcoal strip with teal-separated info segments;
+// returns the y coordinate content must stay above
+static int DrawStatusBar(HDC dc, const RECT &rc,
+                         const std::vector<std::string> &segments)
+{
+    const int h = 28;
+    RECT bar = rc; bar.top = bar.bottom - h;
+    HBRUSH bg = CreateSolidBrush(kHeaderBg);
+    FillRect(dc, &bar, bg);
+    DeleteObject(bg);
+    RECT accent = bar; accent.bottom = accent.top + 2;
+    HBRUSH ab = CreateSolidBrush(kAccent);
+    FillRect(dc, &accent, ab);
+    DeleteObject(ab);
+
+    HGDIOBJ old = SelectObject(dc, g_font_ui);
+    int x = rc.left + 16, y = bar.top + 6;
+    for(size_t i = 0; i < segments.size(); i++) {
+        if(i) {
+            SetTextColor(dc, kAccent);
+            TextOutA(dc, x, y, "\xb7", 1);
+            x += 14;
+        }
+        SetTextColor(dc, kHeaderFg);
+        const std::string &s = segments[i];
+        TextOutA(dc, x, y, s.c_str(), (int)s.size());
+        SIZE sz;
+        GetTextExtentPoint32A(dc, s.c_str(), (int)s.size(), &sz);
+        x += sz.cx + 14;
+        if(x > rc.right - 40) break;
+    }
+    SelectObject(dc, old);
+    SetTextColor(dc, RGB(0,0,0));
+    return bar.top;
+}
+
+static std::string BaseName(const std::string &path)
+{
+    size_t p = path.find_last_of("/\\");
+    return p == std::string::npos ? path : path.substr(p + 1);
 }
 
 // charcoal strip with a white title and teal accent line; returns content top
@@ -326,52 +370,114 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
 }
 
 // ---- main window --------------------------------------------------------------
+// Layout follows the legacy Peak Works frame on the GC301C: the peak table
+// ("Table A") full-width on top, the chromatogram ("Graph A") full-width
+// below it, and an instrument status bar along the bottom.
+static std::string FmtTimeMS(double seconds)
+{
+    long m = (long)(seconds / 60);
+    long s = (long)(seconds - m * 60 + 0.5);
+    if(s == 60) { m++; s = 0; }
+    char b[16];
+    std::snprintf(b, sizeof b, "%ld:%02ld", m, s);
+    return b;
+}
+
 static void PaintMain(HDC dc, const RECT &rc)
 {
     FillRect(dc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
     SetBkMode(dc, TRANSPARENT);
     int top = DrawHeaderStrip(dc, rc, "GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64");
 
-    const int tableW = 420;
-    RECT plot = rc;
-    plot.left += 50; plot.right -= tableW + 10; plot.top = top + 16; plot.bottom -= 40;
-    if(plot.right - plot.left < 50 || plot.bottom - plot.top < 50) return;
+    // totals for the % columns (legacy: share of the summed magnitudes)
+    int nneg = 0, alarm = ALARM_NONE;
+    double habs = 0, aabs = 0;
+    for(const ReportRow &r : g_rows) {
+        if(r.peak.Height < 0) nneg++;
+        alarm |= r.alarm;
+        habs += r.peak.Height < 0 ? -(double)r.peak.Height : (double)r.peak.Height;
+        aabs += r.peak.Area < 0 ? -r.peak.Area : r.peak.Area;
+    }
+    if(habs <= 0) habs = 1;
+    if(aabs <= 0) aabs = 1;
+
+    // bottom instrument status bar (oven temp from the last acquisition)
+    EnterCriticalSection(&g_acq.cs);
+    bool running = g_acq.running;
+    std::string phase = g_acq.phase;
+    auto zones = g_acq.zones;
+    LeaveCriticalSection(&g_acq.cs);
+    char seg[96];
+    std::vector<std::string> segs;
+    for(auto &z : zones) {
+        std::snprintf(seg, sizeof seg, "%s  %.1f \xb0""C", z.first.c_str(), z.second);
+        segs.push_back(seg);
+    }
+    std::snprintf(seg, sizeof seg, "Baseline %ld", g_baseline); segs.push_back(seg);
+    std::snprintf(seg, sizeof seg, "Noise %ld", g_noise);       segs.push_back(seg);
+    segs.push_back(alarm == ALARM_NONE ? "ALARM none" :
+                   alarm == ALARM_HIGH ? "ALARM HIGH" :
+                   alarm == ALARM_LOW  ? "ALARM LOW"  : "ALARM HIGH+LOW");
+    segs.push_back(running ? "ACQ " + phase : "ACQ idle");
+    segs.push_back("DATA " + std::string(g_data_path.empty() ? "synthetic"
+                                         : BaseName(g_data_path).c_str()));
+    segs.push_back("METHOD " + std::string(g_method_path.empty() ? "defaults"
+                                           : BaseName(g_method_path).c_str()));
+    segs.push_back("CAL " + std::string(g_cal_path.empty() ? "none"
+                                        : BaseName(g_cal_path).c_str()));
+    int bottom = DrawStatusBar(dc, rc, segs);
     if(g_trace.empty()) return;
 
-    PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
-
-    int tx = plot.right + 20, ty = plot.top;
-    char line[160]; int len;
-    HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
-    len = std::snprintf(line, sizeof line, "Noise %ld    Baseline %ld    %s method",
-                        g_noise, g_baseline,
-                        g_method.detect_meth == 0 ? "height" : "area");
-    TextOutA(dc, tx, ty, line, len); ty += 26;
-    SelectObject(dc, g_font_mono);
-    len = std::snprintf(line, sizeof line, "Num  Component     RT(s)  Height   Conc.   Alarm");
+    // ---- Table A: full width on top ------------------------------------------
+    HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
+    char line[200]; int len;
+    int ty = top + 12;
+    len = std::snprintf(line, sizeof line,
+        "%-4s %-14s %10s %12s %8s %14s %8s %8s  %s",
+        "Num", "Name", "Conc", "Height", "%", "Area", "%", "Time", "Alarm");
     SetTextColor(dc, kGridGray);
-    TextOutA(dc, tx, ty, line, len); ty += 20;
+    TextOutA(dc, 20, ty, line, len); ty += 22;
+
+    int max_table_bottom = top + 12 + 22 + (bottom - top) * 2 / 5;   // cap at ~40%
     for(const ReportRow &r : g_rows) {
+        if(ty > max_table_bottom) break;
         const Peak &p = r.peak;
         bool neg = p.Height < 0;
-        char conc[24];
+        char num[8], conc[24];
+        if(neg) std::snprintf(num, sizeof num, "-");
+        else    std::snprintf(num, sizeof num, "%d", p.Num);
         if(r.calibrated) std::snprintf(conc, sizeof conc, "%g", r.concentration);
         else             std::snprintf(conc, sizeof conc, "%s", neg ? "-" : "n/cal");
-        const char *alarm = r.alarm == ALARM_NONE ? "" :
-                            r.alarm == ALARM_HIGH ? "HIGH" :
-                            r.alarm == ALARM_LOW  ? "LOW"  : "H+L";
-        if(neg)
-            len = std::snprintf(line, sizeof line, "NEG  %-12s %5.1f  %7ld  (not quantified)",
-                                r.name.c_str(), (double)p.Time / g_method.data_rate, p.Height);
-        else
-            len = std::snprintf(line, sizeof line, "%-4d %-12s %5.1f  %7ld  %-7s %s",
-                                p.Num, r.name.c_str(), (double)p.Time / g_method.data_rate,
-                                p.Height, conc, alarm);
+        const char *al = r.alarm == ALARM_NONE ? "" :
+                         r.alarm == ALARM_HIGH ? "HIGH" :
+                         r.alarm == ALARM_LOW  ? "LOW"  : "H+L";
+        len = std::snprintf(line, sizeof line,
+            "%-4s %-14s %10s %12ld %8.2f %14.0f %8.2f %8s  %s",
+            num, neg ? "Neg" : r.name.c_str(), conc,
+            p.Height, 100.0 * p.Height / habs,
+            p.Area,   100.0 * p.Area / aabs,
+            FmtTimeMS((double)p.Time / g_method.data_rate).c_str(), al);
         SetTextColor(dc, r.alarm ? kAlarmRed : neg ? kNegOrange : RGB(30,32,34));
-        TextOutA(dc, tx, ty, line, len); ty += 19;
+        TextOutA(dc, 20, ty, line, len); ty += 19;
     }
     SetTextColor(dc, RGB(0,0,0));
     SelectObject(dc, oldFont);
+
+    // divider between table and graph (like the legacy child-window edge)
+    {
+        RECT div = rc; div.top = ty + 8; div.bottom = div.top + 2;
+        HBRUSH db = CreateSolidBrush(kAccent);
+        FillRect(dc, &div, db);
+        DeleteObject(db);
+    }
+
+    // ---- Graph A: full width below --------------------------------------------
+    RECT plot = rc;
+    plot.left += 50; plot.right -= 30;
+    plot.top = ty + 24;
+    plot.bottom = bottom - 40;
+    if(plot.right - plot.left < 50 || plot.bottom - plot.top < 50) return;
+    PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
 }
 
 // ---- acquisition window ---------------------------------------------------------
@@ -394,6 +500,21 @@ static void PaintAcq(HDC dc, const RECT &rc)
                   running ? "IN PROGRESS" : "IDLE");
     int top = DrawHeaderStrip(dc, rc, hdr);
 
+    // bottom info bar: backend, phase, sample count, zone temperatures
+    std::vector<std::string> segs;
+    segs.push_back("BACKEND  " + g_method.hw.backend);
+    segs.push_back("PHASE  " + (phase.empty() ? std::string("-") : phase));
+    {
+        char seg[64];
+        std::snprintf(seg, sizeof seg, "POINTS  %zu", live.size());
+        segs.push_back(seg);
+        for(auto &z : zones) {
+            std::snprintf(seg, sizeof seg, "%s  %.1f \xb0""C", z.first.c_str(), z.second);
+            segs.push_back(seg);
+        }
+    }
+    int bottom = DrawStatusBar(dc, rc, segs);
+
     char line[200]; int len;
     HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
     int tx = 20, ty = top + 10;
@@ -414,7 +535,8 @@ static void PaintAcq(HDC dc, const RECT &rc)
     SelectObject(dc, oldFont);
 
     RECT plot = rc;
-    plot.left += 50; plot.right -= 30; plot.top = top + 44; plot.bottom -= 40;
+    plot.left += 50; plot.right -= 30; plot.top = top + 44;
+    plot.bottom = bottom - 40;
     if(plot.right - plot.left < 50 || plot.bottom - plot.top < 50) return;
     int data_rate = g_method.data_rate > 0 ? g_method.data_rate : 10;
     if(live.size() >= 2)
@@ -440,6 +562,29 @@ static void PaintElem(HDC dc, const RECT &rc)
                   g_method.components.size(),
                   g_method.detect_meth == 0 ? "HEIGHT" : "AREA");
     int top = DrawHeaderStrip(dc, rc, hdr);
+
+    // bottom info bar: component/calibration/alarm summary
+    {
+        int ncal = 0, nact = 0, alarm = ALARM_NONE;
+        for(const Component &c : g_method.components) {
+            if(c.active_yn) nact++;
+            for(int s = 0; s < STAND_NUM64; s++)
+                if(c.cal[s].valid) { ncal++; break; }
+        }
+        for(const ReportRow &r : g_rows) alarm |= r.alarm;
+        char seg[64];
+        std::vector<std::string> segs;
+        std::snprintf(seg, sizeof seg, "ACTIVE  %d/%zu", nact, g_method.components.size());
+        segs.push_back(seg);
+        std::snprintf(seg, sizeof seg, "CALIBRATED  %d/%zu", ncal, g_method.components.size());
+        segs.push_back(seg);
+        segs.push_back(alarm == ALARM_NONE ? "ALARM  none" :
+                       alarm == ALARM_HIGH ? "ALARM  HIGH" :
+                       alarm == ALARM_LOW  ? "ALARM  LOW"  : "ALARM  HIGH+LOW");
+        segs.push_back("METHOD  " + std::string(g_method_path.empty() ? "defaults"
+                                                : BaseName(g_method_path).c_str()));
+        DrawStatusBar(dc, rc, segs);
+    }
 
     char line[240]; int len;
     HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
@@ -511,10 +656,33 @@ static void DoubleBufferPaint(HWND hwnd, void (*painter)(HDC, const RECT &))
     EndPaint(hwnd, &ps);
 }
 
+// Run/Window menu shared by the secondary windows; run commands are
+// forwarded to the main window which owns the acquisition thread.
+static HMENU BuildChildMenu(bool with_run)
+{
+    HMENU bar = CreateMenu();
+    if(with_run) {
+        HMENU run = CreatePopupMenu();
+        AppendMenuA(run, MF_STRING, IDM_RUN_START, "&Start Run");
+        AppendMenuA(run, MF_STRING, IDM_RUN_CAL,   "Start &Calibration (std 1)");
+        AppendMenuA(run, MF_SEPARATOR, 0, nullptr);
+        AppendMenuA(run, MF_STRING, IDM_RUN_ABORT, "&Abort");
+        AppendMenuA(bar, MF_POPUP, (UINT_PTR)run, "&Run");
+    }
+    HMENU win = CreatePopupMenu();
+    AppendMenuA(win, MF_STRING, IDM_CLOSE_WIN, "&Close");
+    AppendMenuA(bar, MF_POPUP, (UINT_PTR)win, "&Window");
+    return bar;
+}
+
 static LRESULT CALLBACK AcqWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg) {
         case WM_CREATE:  SetTimer(hwnd, 1, 200, nullptr); return 0;
+        case WM_COMMAND:
+            if(LOWORD(wp) == IDM_CLOSE_WIN) { SendMessageA(hwnd, WM_CLOSE, 0, 0); return 0; }
+            PostMessageA(g_main, WM_COMMAND, wp, 0);   // run commands
+            return 0;
         case WM_TIMER:   InvalidateRect(hwnd, nullptr, FALSE); return 0;
         case WM_PAINT:   DoubleBufferPaint(hwnd, PaintAcq); return 0;
         case WM_SIZE:    InvalidateRect(hwnd, nullptr, FALSE); return 0;
@@ -528,6 +696,10 @@ static LRESULT CALLBACK ElemWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg) {
         case WM_CREATE:  SetTimer(hwnd, 1, 500, nullptr); return 0;
+        case WM_COMMAND:
+            if(LOWORD(wp) == IDM_CLOSE_WIN) { SendMessageA(hwnd, WM_CLOSE, 0, 0); return 0; }
+            PostMessageA(g_main, WM_COMMAND, wp, 0);
+            return 0;
         case WM_TIMER:   InvalidateRect(hwnd, nullptr, FALSE); return 0;
         case WM_PAINT:   DoubleBufferPaint(hwnd, PaintElem); return 0;
         case WM_SIZE:    InvalidateRect(hwnd, nullptr, FALSE); return 0;
@@ -542,7 +714,7 @@ static void ShowAcqWindow(HINSTANCE inst)
     if(g_acqwnd) { SetForegroundWindow(g_acqwnd); return; }
     g_acqwnd = CreateWindowA("WPEAK64_ACQ", "WPEAK64 - Acquisition",
                              WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                             900, 480, nullptr, nullptr, inst, nullptr);
+                             900, 480, nullptr, BuildChildMenu(true), inst, nullptr);
     ShowWindow(g_acqwnd, SW_SHOW);
 }
 
@@ -551,8 +723,147 @@ static void ShowElemWindow(HINSTANCE inst)
     if(g_elemwnd) { SetForegroundWindow(g_elemwnd); return; }
     g_elemwnd = CreateWindowA("WPEAK64_ELEM", "WPEAK64 - Element Table",
                               WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                              1000, 420, nullptr, nullptr, inst, nullptr);
+                              1000, 420, nullptr, BuildChildMenu(false), inst, nullptr);
     ShowWindow(g_elemwnd, SW_SHOW);
+}
+
+// ---- settings window -----------------------------------------------------------
+// Detector & integration parameters edited in-place (legacy Detector dialog).
+// OK re-runs the integrator over the loaded chromatogram with the new values;
+// File > Save Method writes them to an INI.
+static HWND g_setwnd = nullptr;
+
+struct SetField { const char *label; HWND edit; };
+static SetField g_set_fields[] = {
+    { "Data rate (pts/s)",             nullptr },
+    { "Analysis time (s)",             nullptr },
+    { "Segment width (pts)",           nullptr },
+    { "Noise/baseline start (s)",      nullptr },
+    { "Noise/baseline length (s)",     nullptr },
+    { "Min peak height",               nullptr },
+    { "Min peak area",                 nullptr },
+    { "Peak algorithm (0=proj 1=skim)",nullptr },
+    { "Detect method (0=height 1=area)", nullptr },
+};
+static HWND g_set_known = nullptr;   // known peaks only checkbox
+
+// re-run the integrator over the currently loaded trace after a settings
+// change (does not reload files, so edits are not clobbered)
+static void ReprocessTrace()
+{
+    if(g_trace.empty()) return;
+    Integrator integ(g_method.det, g_method.data_rate, g_method.analysis_time);
+    for(long v : g_trace)
+        integ.ProcessPoint(v);
+    g_rows = BuildReport(integ.peaks, g_method);
+    EvaluateAlarms(g_rows, g_method);
+    g_noise    = integ.noise;
+    g_baseline = integ.act_thresh;
+    if(g_main)    InvalidateRect(g_main, nullptr, FALSE);
+    if(g_elemwnd) InvalidateRect(g_elemwnd, nullptr, FALSE);
+}
+
+static void SetEditText(HWND edit, double v)
+{
+    char b[32];
+    std::snprintf(b, sizeof b, "%g", v);
+    SetWindowTextA(edit, b);
+}
+
+static double GetEditNum(HWND edit)
+{
+    char b[64] = "";
+    GetWindowTextA(edit, b, sizeof b);
+    return std::atof(b);
+}
+
+static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    const int nf = (int)(sizeof g_set_fields / sizeof g_set_fields[0]);
+    switch(msg) {
+        case WM_CREATE: {
+            HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
+            int y = 14;
+            for(int i = 0; i < nf; i++) {
+                HWND lab = CreateWindowA("STATIC", g_set_fields[i].label,
+                    WS_CHILD | WS_VISIBLE, 16, y + 3, 230, 20, hwnd, nullptr, inst, nullptr);
+                g_set_fields[i].edit = CreateWindowA("EDIT", "",
+                    WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                    252, y, 110, 24, hwnd, nullptr, inst, nullptr);
+                SendMessageA(lab, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                SendMessageA(g_set_fields[i].edit, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                y += 32;
+            }
+            g_set_known = CreateWindowA("BUTTON", "Report known (matched) peaks only",
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                16, y, 340, 24, hwnd, nullptr, inst, nullptr);
+            SendMessageA(g_set_known, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            y += 36;
+            HWND ok = CreateWindowA("BUTTON", "Apply", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                160, y, 96, 28, hwnd, (HMENU)(UINT_PTR)IDC_SET_OK, inst, nullptr);
+            HWND ca = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE,
+                266, y, 96, 28, hwnd, (HMENU)(UINT_PTR)IDC_SET_CANCEL, inst, nullptr);
+            SendMessageA(ok, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            SendMessageA(ca, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            // populate from the live method
+            SetEditText(g_set_fields[0].edit, g_method.data_rate);
+            SetEditText(g_set_fields[1].edit, (double)g_method.analysis_time);
+            SetEditText(g_set_fields[2].edit, g_method.det.segment_width);
+            SetEditText(g_set_fields[3].edit, (double)g_method.det.NandBtime);
+            SetEditText(g_set_fields[4].edit, (double)g_method.det.NandBlen);
+            SetEditText(g_set_fields[5].edit, (double)g_method.det.MinHeight);
+            SetEditText(g_set_fields[6].edit, g_method.det.MinArea);
+            SetEditText(g_set_fields[7].edit, g_method.det.peak_alg);
+            SetEditText(g_set_fields[8].edit, g_method.detect_meth);
+            SendMessageA(g_set_known, BM_SETCHECK,
+                         g_method.known_peaks ? BST_CHECKED : BST_UNCHECKED, 0);
+            return 0;
+        }
+        case WM_COMMAND:
+            if(LOWORD(wp) == IDC_SET_OK) {
+                int dr = (int)GetEditNum(g_set_fields[0].edit);
+                long at = (long)GetEditNum(g_set_fields[1].edit);
+                int sw = (int)GetEditNum(g_set_fields[2].edit);
+                if(dr <= 0 || at <= 0 || sw <= 0 ||
+                   sw > DataQueue::MAX_Q * DataQueue::MULT_Q / 3) {
+                    MessageBoxA(hwnd, "data rate, analysis time and segment width "
+                                "must be positive (segment width <= 42)",
+                                "WPEAK64 Settings", MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                g_method.data_rate         = dr;
+                g_method.analysis_time     = at;
+                g_method.det.segment_width = sw;
+                g_method.det.NandBtime     = (long)GetEditNum(g_set_fields[3].edit);
+                g_method.det.NandBlen      = (long)GetEditNum(g_set_fields[4].edit);
+                g_method.det.MinHeight     = (long)GetEditNum(g_set_fields[5].edit);
+                g_method.det.MinArea       = GetEditNum(g_set_fields[6].edit);
+                g_method.det.peak_alg      = (int)GetEditNum(g_set_fields[7].edit);
+                g_method.detect_meth       = (int)GetEditNum(g_set_fields[8].edit);
+                g_method.known_peaks       =
+                    SendMessageA(g_set_known, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                ReprocessTrace();
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if(LOWORD(wp) == IDC_SET_CANCEL) { DestroyWindow(hwnd); return 0; }
+            break;
+        case WM_CLOSE:   DestroyWindow(hwnd); return 0;
+        case WM_DESTROY: g_setwnd = nullptr;  return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void ShowSettingsWindow(HINSTANCE inst)
+{
+    if(g_setwnd) { SetForegroundWindow(g_setwnd); return; }
+    g_setwnd = CreateWindowA("WPEAK64_SET", "WPEAK64 - Settings",
+                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                             CW_USEDEFAULT, CW_USEDEFAULT, 400,
+                             14 + 9 * 32 + 36 + 28 + 60,
+                             g_main, nullptr, inst, nullptr);
+    ShowWindow(g_setwnd, SW_SHOW);
 }
 
 static std::string FileDialog(HWND hwnd, bool save, const char *filter, const char *defext)
@@ -602,6 +913,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     if(!p.empty()) { g_cal_path = p; Reanalyze(hwnd); }
                     return 0;
                 }
+                case IDM_SAVE_METHOD: {
+                    std::string p = FileDialog(hwnd, true,
+                        "Method file (*.ini)\0*.ini\0", "ini");
+                    if(!p.empty()) {
+                        std::string err;
+                        if(!SaveMethod(p, g_method, err))
+                            MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
+                        else
+                            g_method_path = p;
+                    }
+                    return 0;
+                }
+                case IDM_SETTINGS:
+                    ShowSettingsWindow(inst);
+                    return 0;
+                case IDM_ABOUT:
+                    MessageBoxA(hwnd,
+                        "GC301c Gas Chromatograph\n"
+                        "WPEAK64 - 64-bit Windows port of WPEAK 2.4.43\n\n"
+                        "Peak detection (positive + negative), component\n"
+                        "identification, multipoint calibration, acquisition\n"
+                        "via ADS1115/GPIO, alarms, TWA/STEL reporting.\n\n"
+                        "PID Analyzers (HNU Technology)",
+                        "About WPEAK64", MB_OK | MB_ICONINFORMATION);
+                    return 0;
                 case IDM_EXPORT: {
                     std::string p = FileDialog(hwnd, true,
                         "Report CSV (*.csv)\0*.csv\0", "csv");
@@ -712,12 +1048,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     RegisterClassA(&wc);
     wc.lpfnWndProc   = ElemWndProc;  wc.lpszClassName = "WPEAK64_ELEM";
     RegisterClassA(&wc);
+    wc.lpfnWndProc   = SetWndProc;   wc.lpszClassName = "WPEAK64_SET";
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    RegisterClassA(&wc);
 
     HMENU file = CreatePopupMenu();
     AppendMenuA(file, MF_STRING, IDM_OPEN_DATA,   "Open &Data (CSV)...");
     AppendMenuA(file, MF_STRING, IDM_OPEN_METHOD, "Open &Method (INI)...");
     AppendMenuA(file, MF_STRING, IDM_OPEN_CAL,    "Open &Calibration (INI)...");
     AppendMenuA(file, MF_SEPARATOR, 0, nullptr);
+    AppendMenuA(file, MF_STRING, IDM_SAVE_METHOD, "&Save Method (INI)...");
     AppendMenuA(file, MF_STRING, IDM_EXPORT,      "&Export Report (CSV)...");
     AppendMenuA(file, MF_SEPARATOR, 0, nullptr);
     AppendMenuA(file, MF_STRING, IDM_EXIT,        "E&xit");
@@ -726,13 +1066,19 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     AppendMenuA(run, MF_STRING, IDM_RUN_CAL,   "Start &Calibration (std 1)");
     AppendMenuA(run, MF_SEPARATOR, 0, nullptr);
     AppendMenuA(run, MF_STRING, IDM_RUN_ABORT, "&Abort");
+    HMENU opts = CreatePopupMenu();
+    AppendMenuA(opts, MF_STRING, IDM_SETTINGS, "&Detector && Integration...");
     HMENU view = CreatePopupMenu();
     AppendMenuA(view, MF_STRING, IDM_WIN_ACQ,  "&Acquisition Window");
     AppendMenuA(view, MF_STRING, IDM_WIN_ELEM, "&Element Table");
+    HMENU help = CreatePopupMenu();
+    AppendMenuA(help, MF_STRING, IDM_ABOUT, "&About WPEAK64...");
     HMENU menubar = CreateMenu();
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)file, "&File");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)run,  "&Run");
-    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)view, "&View");
+    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)opts, "&Options");
+    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)view, "&Window");
+    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)help, "&Help");
 
     g_main = CreateWindowA("WPEAK64",
                            "GC301c - WPEAK64 (64-bit Windows port)",

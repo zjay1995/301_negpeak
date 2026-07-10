@@ -88,7 +88,7 @@ static void PrintRows(const Method &m, const AcquireResult &res, int point)
                             r.alarm == ALARM_LOW  ? "LOW"  : "H+L";
         std::printf("%-5s %-14s %-8.1f %-9ld %-11.0f %-12s %-6s %s\n",
                     num, r.name.c_str(), (double)p.Time / m.data_rate,
-                    p.Height, neg ? 0.0 : p.Area, conc, alarm,
+                    p.Height, p.Area, conc, alarm,
                     neg ? "NEGATIVE (not quantified)" : "positive");
     }
 }

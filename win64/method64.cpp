@@ -159,6 +159,83 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
     return true;
 }
 
+bool SaveMethod(const std::string &path, const Method &m, std::string &err)
+{
+    std::ofstream f(path);
+    if(!f) { err = "cannot write method file: " + path; return false; }
+    char b[128];
+
+    f << "# GC301c WPEAK64 method\n\n[detector]\n";
+    f << "segment_width=" << m.det.segment_width << "\n";
+    f << "nandb_time="    << m.det.NandBtime     << "\n";
+    f << "nandb_len="     << m.det.NandBlen      << "\n";
+    f << "min_height="    << m.det.MinHeight     << "\n";
+    std::snprintf(b, sizeof b, "min_area=%g\n", m.det.MinArea); f << b;
+    f << "peak_alg="      << m.det.peak_alg      << "\n";
+    f << "noise_reduct="  << m.det.noise_reduct  << "\n";
+    f << "detect_meth="   << m.detect_meth       << "\n";
+    f << "known_peaks="   << (m.known_peaks ? 1 : 0) << "\n";
+    f << "data_rate="     << m.data_rate         << "\n";
+    f << "analysis_time=" << m.analysis_time     << "\n";
+
+    for(const Component &c : m.components) {
+        f << "\n[component]\nname=" << c.name << "\n";
+        std::snprintf(b, sizeof b, "rt=%g\nwindow=%g\nresponse=%g\n",
+                      c.peak_rt, c.window, c.response);
+        f << b << "active=" << (c.active_yn ? 1 : 0) << "\n";
+        if(c.alarm_high > 0) { std::snprintf(b, sizeof b, "alarm_high=%g\n", c.alarm_high); f << b; }
+        if(c.alarm_low  > 0) { std::snprintf(b, sizeof b, "alarm_low=%g\n",  c.alarm_low);  f << b; }
+        for(int s = 0; s < STAND_NUM64; s++)
+            if(c.stand[s] > 0) {
+                std::snprintf(b, sizeof b, "std%d=%g\n", s + 1, c.stand[s]);
+                f << b;
+            }
+    }
+
+    const HardwareConfig &h = m.hw;
+    f << "\n[hardware]\nbackend=" << h.backend << "\n";
+    f << "i2c_dev=" << h.i2c_dev << "\n";
+    std::snprintf(b, sizeof b, "i2c_addr=0x%02X\n", h.i2c_addr); f << b;
+    f << "adc_channel=" << h.adc_channel << "\npga_mv=" << h.pga_mv
+      << "\nsps=" << h.sps << "\ngpio_chip=" << h.gpio_chip << "\n";
+    auto line_kv = [&](const char *k, int v) { if(v >= 0) f << k << "=" << v << "\n"; };
+    line_kv("sample_valve", h.sample_valve);
+    line_kv("inject_valve", h.inject_valve);
+    line_kv("cal_valve",    h.cal_valve);
+    line_kv("purge_valve",  h.purge_valve);
+    line_kv("pump",         h.pump);
+    line_kv("lamp",         h.lamp);
+    line_kv("fan",          h.fan);
+    line_kv("autozero",     h.autozero);
+    line_kv("alarm_high_line", h.alarm_high_line);
+    line_kv("alarm_low_line",  h.alarm_low_line);
+    if(!h.point_valves.empty()) {
+        f << "point_valves=";
+        for(size_t i = 0; i < h.point_valves.size(); i++)
+            f << (i ? "," : "") << h.point_valves[i];
+        f << "\n";
+    }
+
+    for(const TempZone &z : m.zones) {
+        f << "\n[tempzone]\nname=" << z.name << "\n";
+        f << "adc_channel=" << z.adc_channel << "\nheater_line=" << z.heater_line << "\n";
+        std::snprintf(b, sizeof b, "setpoint=%g\nhysteresis=%g\nscale=%g\noffset=%g\n",
+                      z.setpoint_c, z.hysteresis_c, z.scale, z.offset);
+        f << b;
+    }
+
+    const TimingConfig &t = m.timing;
+    f << "\n[timing]\nequil_time=" << t.equil_time << "\n";
+    if(t.autozero_time > 0) f << "autozero_time=" << t.autozero_time << "\n";
+    f << "sample_time=" << t.sample_time << "\ninject_time=" << t.inject_time
+      << "\npurge_time=" << t.purge_time << "\n";
+    if(t.repeat_interval > 0) f << "repeat_interval=" << t.repeat_interval << "\n";
+    if(t.auto_cal_every > 0)
+        f << "auto_cal_every=" << t.auto_cal_every
+          << "\nauto_cal_standard=" << t.auto_cal_standard << "\n";
+    return (bool)f;
+}
+
 bool LoadChromatogram(const std::string &path, std::vector<long> &y, std::string &err)
 {
     std::ifstream f(path);
@@ -399,7 +476,7 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
                       r.name.c_str(),
                       (double)p.Time / m.data_rate,
                       p.Height,
-                      neg ? 0.0 : p.Area,
+                      p.Area,
                       (double)p.From / m.data_rate,
                       (double)p.To   / m.data_rate,
                       conc.c_str(),

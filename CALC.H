@@ -215,6 +215,7 @@ class Integrator: public RawData {
   // (peak_alg 0/1). Detection only - see DetectNegativePeak(). 06/29/26
   long neg_start_of_peak;  // ret. time when current neg. peak began (-1 = none)
   long neg_peak_min;       // most negative height (<=0) seen in current neg. peak
+  double neg_peak_area;    // accumulated (negative) area under baseline. 07/10/26
 
   Peak peak;	// current peak
   PeakList *pPeakList;
