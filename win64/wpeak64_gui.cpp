@@ -24,7 +24,6 @@
 #include "peak64.h"
 #include "method64.h"
 #include "acquire64.h"
-#include "synth64.h"
 
 using namespace wpeak64;
 
@@ -254,30 +253,33 @@ static bool RunAnalysis(HWND hwnd, std::string &err)
         if(!LoadCalibration(g_cal_path, m, cerr)) { err = cerr; return false; }
     }
 
+    // start empty: no demo data -- the plot fills from File > Open Data or a run
     std::vector<long> y;
-    if(g_data_path.empty()) {
-        SynthConfig cfg;
-        cfg.data_rate = m.data_rate;
-        cfg.analysis_time = m.analysis_time;
-        y = MakeChromatogram(cfg, DefaultPeaks());
+    if(!g_data_path.empty()) {
+        if(!LoadChromatogram(g_data_path, y, err))
+            return false;
     }
-    else if(!LoadChromatogram(g_data_path, y, err))
-        return false;
 
-    Integrator integ(m.det, m.data_rate, m.analysis_time);
-    for(long v : y)
-        integ.ProcessPoint(v);
-
-    g_method   = m;
-    g_trace    = y;
-    g_rows     = BuildReport(integ.peaks, m);
-    EvaluateAlarms(g_rows, m);
-    g_noise    = integ.noise;
-    g_baseline = integ.act_thresh;
+    g_method = m;
+    if(y.empty()) {
+        g_trace.clear();
+        g_rows.clear();
+        g_noise = g_baseline = 0;
+    }
+    else {
+        Integrator integ(m.det, m.data_rate, m.analysis_time);
+        for(long v : y)
+            integ.ProcessPoint(v);
+        g_trace    = y;
+        g_rows     = BuildReport(integ.peaks, m);
+        EvaluateAlarms(g_rows, m);
+        g_noise    = integ.noise;
+        g_baseline = integ.act_thresh;
+    }
 
     char title[512];
     std::snprintf(title, sizeof title, "GC301c - WPEAK64 (64-bit Windows port) - %s%s%s",
-                  g_data_path.empty() ? "synthetic demo" : g_data_path.c_str(),
+                  g_data_path.empty() ? "no data" : g_data_path.c_str(),
                   g_method_path.empty() ? "" : " / ",
                   g_method_path.c_str());
     if(hwnd) SetWindowTextA(hwnd, title);
@@ -406,6 +408,7 @@ static void PaintMain(HDC dc, const RECT &rc)
     bool running = g_acq.running;
     std::string phase = g_acq.phase;
     auto zones = g_acq.zones;
+    std::vector<long> live = running ? g_acq.live : std::vector<long>();
     LeaveCriticalSection(&g_acq.cs);
     char seg[96];
     std::vector<std::string> segs;
@@ -419,14 +422,59 @@ static void PaintMain(HDC dc, const RECT &rc)
                    alarm == ALARM_HIGH ? "ALARM HIGH" :
                    alarm == ALARM_LOW  ? "ALARM LOW"  : "ALARM HIGH+LOW");
     segs.push_back(running ? "ACQ " + phase : "ACQ idle");
-    segs.push_back("DATA " + std::string(g_data_path.empty() ? "synthetic"
+    segs.push_back("DATA " + std::string(g_data_path.empty() ? "none"
                                          : BaseName(g_data_path).c_str()));
     segs.push_back("METHOD " + std::string(g_method_path.empty() ? "defaults"
                                            : BaseName(g_method_path).c_str()));
     segs.push_back("CAL " + std::string(g_cal_path.empty() ? "none"
                                         : BaseName(g_cal_path).c_str()));
     int bottom = DrawStatusBar(dc, rc, segs);
-    if(g_trace.empty()) return;
+
+    // during an acquisition the live trace draws HERE, in the main graph
+    // pane (legacy Graph A), not in a separate window
+    if(running) {
+        HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
+        SetTextColor(dc, kAccent);
+        std::string s = "ACQUIRING  \xb7  " + (phase.empty() ? std::string("-") : phase);
+        for(auto &z : zones) {
+            char zb[48];
+            std::snprintf(zb, sizeof zb, "   \xb7   %s %.1f \xb0""C", z.first.c_str(), z.second);
+            s += zb;
+        }
+        TextOutA(dc, 20, top + 14, s.c_str(), (int)s.size());
+        SelectObject(dc, of);
+        SetTextColor(dc, RGB(0,0,0));
+
+        RECT plot = rc;
+        plot.left += 50; plot.right -= 30;
+        plot.top = top + 52; plot.bottom = bottom - 40;
+        if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
+            if(live.size() >= 2)
+                PaintTrace(dc, plot, live, 0, nullptr,
+                           g_method.data_rate > 0 ? g_method.data_rate : 10);
+            else {
+                HGDIOBJ f2 = SelectObject(dc, g_font_ui);
+                SetTextColor(dc, kGridGray);
+                const char *w = "waiting for the ANALYZE phase...";
+                TextOutA(dc, plot.left, plot.top, w, (int)strlen(w));
+                SelectObject(dc, f2);
+                SetTextColor(dc, RGB(0,0,0));
+            }
+        }
+        return;
+    }
+
+    // empty startup: nothing loaded and nothing acquired yet
+    if(g_trace.empty()) {
+        HGDIOBJ of = SelectObject(dc, g_font_ui);
+        SetTextColor(dc, kGridGray);
+        const char *hint =
+            "No data.  Open a chromatogram (File > Open Data) or press Run to start an acquisition.";
+        TextOutA(dc, 20, top + 16, hint, (int)strlen(hint));
+        SelectObject(dc, of);
+        SetTextColor(dc, RGB(0,0,0));
+        return;
+    }
 
     // ---- Table A: full width on top ------------------------------------------
     HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
@@ -949,10 +997,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     return 0;
                 }
                 case IDM_RUN_START:
-                    if(StartAcquisition(hwnd, false, 0)) ShowAcqWindow(inst);
+                    // live trace draws in the main window's graph pane
+                    if(StartAcquisition(hwnd, false, 0))
+                        InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 case IDM_RUN_CAL:
-                    if(StartAcquisition(hwnd, true, 1)) ShowAcqWindow(inst);
+                    if(StartAcquisition(hwnd, true, 1))
+                        InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 case IDM_RUN_ABORT:
                     EnterCriticalSection(&g_acq.cs);
@@ -991,6 +1042,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if(g_elemwnd) InvalidateRect(g_elemwnd, nullptr, FALSE);
             return 0;
         }
+        case WM_TIMER:   // repaint the live trace while a run is in progress
+            EnterCriticalSection(&g_acq.cs);
+            {
+                bool running = g_acq.running;
+                LeaveCriticalSection(&g_acq.cs);
+                if(running) InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
         case WM_PAINT: DoubleBufferPaint(hwnd, PaintMain); return 0;
         case WM_SIZE:  InvalidateRect(hwnd, nullptr, FALSE); return 0;
         case WM_DESTROY:
@@ -1075,10 +1134,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     AppendMenuA(help, MF_STRING, IDM_ABOUT, "&About WPEAK64...");
     HMENU menubar = CreateMenu();
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)file, "&File");
-    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)run,  "&Run");
+    AppendMenuA(menubar, MF_POPUP, (UINT_PTR)run,  "&Acquire");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)opts, "&Options");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)view, "&Window");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)help, "&Help");
+    // one-click shortcuts directly on the menu bar (legacy toolbar style)
+    AppendMenuA(menubar, MF_STRING, IDM_RUN_START, "&Run");
+    AppendMenuA(menubar, MF_STRING, IDM_RUN_ABORT, "S&top");
 
     g_main = CreateWindowA("WPEAK64",
                            "GC301c - WPEAK64 (64-bit Windows port)",
@@ -1087,9 +1149,9 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     RunAnalysis(g_main, err);  // refresh title with loaded file names
     ShowWindow(g_main, nShow);
     UpdateWindow(g_main);
+    SetTimer(g_main, 1, 200, nullptr);   // live-trace repaint during runs
 
-    if(g_autorun) {            // kiosk-style start: both windows + a run
-        ShowElemWindow(hInst);
+    if(g_autorun) {            // kiosk-style start: begin a run immediately
         PostMessageA(g_main, WM_COMMAND, IDM_RUN_START, 0);
     }
 
