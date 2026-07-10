@@ -88,6 +88,8 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "window")   cur->window    = std::atof(val.c_str());
             else if(key == "response") cur->response  = std::atof(val.c_str());
             else if(key == "active")   cur->active_yn = std::atoi(val.c_str()) != 0;
+            else if(key == "alarm_high") cur->alarm_high = std::atof(val.c_str());
+            else if(key == "alarm_low")  cur->alarm_low  = std::atof(val.c_str());
             else if(key.size() == 4 && key.compare(0, 3, "std") == 0 &&
                     key[3] >= '1' && key[3] <= '0' + STAND_NUM64) {
                 cur->stand[key[3] - '1'] = std::atof(val.c_str());   // std1..std8
@@ -110,6 +112,16 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "pump")         h.pump         = std::atoi(val.c_str());
             else if(key == "lamp")         h.lamp         = std::atoi(val.c_str());
             else if(key == "fan")          h.fan          = std::atoi(val.c_str());
+            else if(key == "alarm_high_line") h.alarm_high_line = std::atoi(val.c_str());
+            else if(key == "alarm_low_line")  h.alarm_low_line  = std::atoi(val.c_str());
+            else if(key == "point_valves") {   // comma-separated GPIO line list
+                h.point_valves.clear();
+                std::stringstream ss(val);
+                std::string tok;
+                while(std::getline(ss, tok, ','))
+                    if(!Trim(tok).empty())
+                        h.point_valves.push_back(std::atoi(Trim(tok).c_str()));
+            }
             else { err = path + ":" + std::to_string(lineno) + ": unknown hardware key '" + key + "'"; return false; }
         }
         else if(section == "tempzone" && zone) {
@@ -127,6 +139,9 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "sample_time") m.timing.sample_time = std::atol(val.c_str());
             else if(key == "inject_time") m.timing.inject_time = std::atol(val.c_str());
             else if(key == "purge_time")  m.timing.purge_time  = std::atol(val.c_str());
+            else if(key == "repeat_interval")   m.timing.repeat_interval   = std::atol(val.c_str());
+            else if(key == "auto_cal_every")    m.timing.auto_cal_every    = std::atoi(val.c_str());
+            else if(key == "auto_cal_standard") m.timing.auto_cal_standard = std::atoi(val.c_str());
             else { err = path + ":" + std::to_string(lineno) + ": unknown timing key '" + key + "'"; return false; }
         }
         else {
@@ -255,6 +270,23 @@ std::vector<ReportRow> BuildReport(const std::vector<Peak> &peaks, const Method 
     return rows;
 }
 
+int EvaluateAlarms(std::vector<ReportRow> &rows, const Method &m)
+{
+    int all = ALARM_NONE;
+    for(ReportRow &r : rows) {
+        r.alarm = ALARM_NONE;
+        if(r.component < 0 || !r.calibrated || r.peak.Height < 0)
+            continue;
+        const Component &c = m.components[(size_t)r.component];
+        if(c.alarm_high > 0 && r.concentration >= c.alarm_high)
+            r.alarm |= ALARM_HIGH;
+        if(c.alarm_low > 0 && r.concentration <= c.alarm_low)
+            r.alarm |= ALARM_LOW;
+        all |= r.alarm;
+    }
+    return all;
+}
+
 bool LoadCalibration(const std::string &path, Method &m, std::string &err)
 {
     std::ifstream f(path);
@@ -347,7 +379,7 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
     f << "# GC301c WPEAK64 peak report\n";
     f << "# noise=" << noise << " baseline=" << baseline
       << " detect_meth=" << (m.detect_meth == 0 ? "height" : "area") << "\n";
-    f << "num,component,rt_s,height,area,from_s,to_s,concentration,type\n";
+    f << "num,component,rt_s,height,area,from_s,to_s,concentration,type,alarm\n";
     char buf[256];
     for(const ReportRow &r : rows) {
         const Peak &p = r.peak;
@@ -357,7 +389,10 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
             std::snprintf(buf, sizeof buf, "%g", r.concentration);
             conc = buf;
         }
-        std::snprintf(buf, sizeof buf, "%s,%s,%.1f,%ld,%.0f,%.1f,%.1f,%s,%s\n",
+        const char *alarm = r.alarm == ALARM_NONE ? "" :
+                            r.alarm == ALARM_HIGH ? "HIGH" :
+                            r.alarm == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
+        std::snprintf(buf, sizeof buf, "%s,%s,%.1f,%ld,%.0f,%.1f,%.1f,%s,%s,%s\n",
                       neg ? "-" : std::to_string(p.Num).c_str(),
                       r.name.c_str(),
                       (double)p.Time / m.data_rate,
@@ -366,7 +401,8 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
                       (double)p.From / m.data_rate,
                       (double)p.To   / m.data_rate,
                       conc.c_str(),
-                      neg ? "negative" : "positive");
+                      neg ? "negative" : "positive",
+                      alarm);
         f << buf;
     }
     return (bool)f;

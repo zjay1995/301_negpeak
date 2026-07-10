@@ -51,7 +51,7 @@ double SimHardware::DetectorVolts()
         double ta = t_ - inject_t_;
         for(const auto &d : defs) {
             double dt = (ta - d.rt) / d.sig;
-            v += sim_scale_ * d.h * std::exp(-0.5 * dt * dt);
+            v += sim_scale_ * point_factor_ * d.h * std::exp(-0.5 * dt * dt);
         }
     }
     rng_ = rng_ * 1103515245u + 12345u;
@@ -116,7 +116,10 @@ bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
         std::vector<int> lines = {
             hw.sample_valve, hw.inject_valve, hw.cal_valve, hw.purge_valve,
             hw.pump, hw.lamp, hw.fan,
+            hw.alarm_high_line, hw.alarm_low_line,
         };
+        for(int pv : hw.point_valves)
+            lines.push_back(pv);
         for(const TempZone &z : zones)
             lines.push_back(z.heater_line);
         GpioOut *out = GpioOut::Open(hw.gpio_chip, lines, err);

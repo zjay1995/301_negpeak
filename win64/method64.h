@@ -35,6 +35,9 @@ struct Component {
     bool   active_yn = true;
     double stand[STAND_NUM64] = {0};      // standard concentrations (std1..std8)
     CalPoint cal[STAND_NUM64];            // measured calibration table
+    // concentration alarm limits (legacy H/L alarms; 0 = disabled)
+    double alarm_high = 0;
+    double alarm_low  = 0;
 };
 
 // Method: detector settings + run parameters + component table + hardware.
@@ -52,12 +55,15 @@ struct Method {
 };
 
 // A reported peak: the detected Peak plus identification results.
+enum AlarmState { ALARM_NONE = 0, ALARM_HIGH = 1, ALARM_LOW = 2 };
+
 struct ReportRow {
     Peak        peak;
     int         component  = -1;     // index into Method::components, -1 = unknown
     std::string name;                // component name or "unknown"
     double      concentration = 0;   // 0 when not calibrated / unknown / negative
     bool        calibrated = false;
+    int         alarm = ALARM_NONE;  // legacy H/L concentration alarms
 };
 
 // ---- Method file (INI) ------------------------------------------------------
@@ -118,6 +124,13 @@ bool ConcentrationFromCal(const Component &c, double response, double &conc);
 // component name; unknown names are an error on load, skipped on save).
 bool LoadCalibration(const std::string &path, Method &m, std::string &err);
 bool SaveCalibration(const std::string &path, const Method &m, std::string &err);
+
+// ---- Alarms -------------------------------------------------------------------
+// Evaluate the H/L concentration alarms (legacy GetAlarmFlags): a calibrated,
+// identified peak trips HIGH when conc >= alarm_high (if set) and LOW when
+// conc <= alarm_low (if set). Fills ReportRow::alarm; returns the OR of all
+// alarm states so the caller can drive the alarm relays.
+int EvaluateAlarms(std::vector<ReportRow> &rows, const Method &m);
 
 // Write the report as CSV. Returns false and fills err on I/O failure.
 bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,

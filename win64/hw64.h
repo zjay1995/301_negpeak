@@ -62,6 +62,12 @@ struct HardwareConfig {
     int pump         = -1;
     int lamp         = -1;
     int fan          = -1;
+    // multipoint manifold: one point-select valve per sample point
+    // (legacy POINTS(); empty = single point on sample_valve)
+    std::vector<int> point_valves;
+    // concentration alarm relays (common across points, as legacy COMMON_HIGH)
+    int alarm_high_line = -1;
+    int alarm_low_line  = -1;
 };
 
 // One controlled temperature zone (oven, injector, detector...), read via an
@@ -85,6 +91,10 @@ struct TimingConfig {
     long sample_time = 10;   // sample pump/valve on
     long inject_time = 5;    // injection valve energized
     long purge_time  = 10;   // post-run purge
+    // scheduling (continuous/repeat modes, legacy RunMode + repeat_cycle)
+    long repeat_interval = 0;   // s between run starts (0 = back-to-back)
+    int  auto_cal_every  = 0;   // insert a cal run every N runs (0 = never)
+    int  auto_cal_standard = 1; // which standard the auto-cal measures
 };
 
 // ---- simulation backend ------------------------------------------------------
@@ -108,13 +118,17 @@ public:
     void AdvanceSeconds(double dt);
     double NowSeconds() const { return t_; }
 
-    void MarkInjection() { inject_t_ = t_; }   // peaks are timed from injection
+    // peaks are timed from injection; point_factor scales the peak pattern so
+    // different sample points show different concentrations in simulation
+    void MarkInjection(double point_factor = 1.0)
+    { inject_t_ = t_; point_factor_ = point_factor; }
 
 private:
     HardwareConfig hw_;
     std::vector<TempZone> zones_;
     std::vector<double> zone_temp_c_;
     double sim_scale_;
+    double point_factor_ = 1.0;
     double t_ = 0;                 // simulated seconds
     double inject_t_ = -1;         // time of injection, -1 = none yet
     bool   lines_[64] = {};

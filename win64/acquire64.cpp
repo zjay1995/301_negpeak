@@ -8,8 +8,8 @@
 
 namespace wpeak64 {
 
-AcquireRun::AcquireRun(const Method &m, Hardware &h, int standard_num)
-    : m_(m), h_(h), standard_num_(standard_num)
+AcquireRun::AcquireRun(const Method &m, Hardware &h, int standard_num, int point)
+    : m_(m), h_(h), standard_num_(standard_num), point_(point < 1 ? 1 : point)
 {
 }
 
@@ -55,16 +55,22 @@ void AcquireRun::Tick(double dt)
 
 void AcquireRun::AllOff()
 {
+    // note: alarm relay lines are intentionally NOT cleared here -- alarms
+    // hold their state between runs (legacy behavior) until a run with
+    // in-limit concentrations updates them.
     const HardwareConfig &hw = m_.hw;
     int lines[] = { hw.sample_valve, hw.inject_valve, hw.cal_valve,
                     hw.purge_valve, hw.pump, hw.lamp, hw.fan };
     for(int l : lines)
         if(l >= 0) h_.out->Set(l, false);
+    for(int pv : hw.point_valves)
+        if(pv >= 0) h_.out->Set(pv, false);
     for(const TempZone &z : m_.zones)
         if(z.heater_line >= 0) h_.out->Set(z.heater_line, false);
 }
 
-bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
+bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
+                     AcquireProgress *progress)
 {
     const HardwareConfig &hw = m_.hw;
     out = AcquireResult();
@@ -78,6 +84,20 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
                     std::printf("  %s=%.1fC", z.name.c_str(), ZoneTempC(z));
             std::printf("\n");
         }
+        if(progress) {
+            progress->OnPhase(name);
+            for(const TempZone &z : m_.zones)
+                if(z.setpoint_c > 0)
+                    progress->OnZone(z.name.c_str(), ZoneTempC(z));
+        }
+    };
+    auto aborted = [&]() {
+        if(progress && progress->Aborted()) {
+            AllOff();
+            err = "aborted";
+            return true;
+        }
+        return false;
     };
 
     // --- EQUILIBRATE ---
@@ -99,10 +119,24 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
         }
     }
 
-    // --- SAMPLE --- (cal valve replaces sample valve for a calibration run)
+    if(aborted()) return false;
+
+    // --- SAMPLE --- (cal valve replaces the sample intake for a calibration
+    // run; with a point-valve manifold the selected point valve is used)
     phase(standard_num_ > 0 ? "SAMPLE (calibration standard)" : "SAMPLE");
-    int intake = standard_num_ > 0 && hw.cal_valve >= 0 ? hw.cal_valve
-                                                        : hw.sample_valve;
+    int intake;
+    if(standard_num_ > 0 && hw.cal_valve >= 0)
+        intake = hw.cal_valve;
+    else if(!hw.point_valves.empty()) {
+        int idx = point_ - 1;
+        if(idx >= (int)hw.point_valves.size()) {
+            err = "point " + std::to_string(point_) + " exceeds point_valves list";
+            return false;
+        }
+        intake = hw.point_valves[(size_t)idx];
+    }
+    else
+        intake = hw.sample_valve;
     if(intake >= 0)   h_.out->Set(intake, true);
     if(hw.pump >= 0)  h_.out->Set(hw.pump, true);
     for(double t = 0; t < (double)m_.timing.sample_time; t += tick) {
@@ -111,12 +145,18 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
     }
     if(hw.pump >= 0)  h_.out->Set(hw.pump, false);
     if(intake >= 0)   h_.out->Set(intake, false);
+    if(aborted()) return false;
 
     // --- INJECT ---
     phase("INJECT");
     if(hw.lamp >= 0)         h_.out->Set(hw.lamp, true);
     if(hw.inject_valve >= 0) h_.out->Set(hw.inject_valve, true);
-    if(h_.sim) h_.sim->MarkInjection();
+    if(h_.sim) {
+        // in simulation, different sample points carry different
+        // concentrations so multipoint runs are distinguishable
+        double point_factor = 1.0 + 0.25 * (point_ - 1);
+        h_.sim->MarkInjection(standard_num_ > 0 ? 1.0 : point_factor);
+    }
     for(double t = 0; t < (double)m_.timing.inject_time; t += tick) {
         ServiceTempZones();
         Tick(tick);
@@ -135,8 +175,15 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
             long counts = h_.adc->ReadCounts(hw.adc_channel);
             out.trace.push_back(counts);
             integ.ProcessPoint(counts);
-            if(i % (m_.data_rate * 5) == 0)          // service heaters ~5 s
+            if(progress) progress->OnPoint(counts);
+            if(i % (m_.data_rate * 5) == 0) {        // service heaters ~5 s
                 ServiceTempZones();
+                if(progress)
+                    for(const TempZone &z : m_.zones)
+                        if(z.setpoint_c > 0)
+                            progress->OnZone(z.name.c_str(), ZoneTempC(z));
+                if(aborted()) return false;
+            }
             Tick(dt);
         }
     }
@@ -156,6 +203,15 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err)
     out.baseline = integ.act_thresh;
     out.peaks    = integ.peaks;
     out.rows     = BuildReport(integ.peaks, m_);
+
+    // H/L concentration alarms: evaluate and drive the alarm relays. The
+    // lines are updated (not just set) so a run back in limits clears them.
+    out.alarm_state = EvaluateAlarms(out.rows, m_);
+    if(hw.alarm_high_line >= 0)
+        h_.out->Set(hw.alarm_high_line, (out.alarm_state & ALARM_HIGH) != 0);
+    if(hw.alarm_low_line >= 0)
+        h_.out->Set(hw.alarm_low_line, (out.alarm_state & ALARM_LOW) != 0);
+
     phase("DONE");
     return true;
 }
