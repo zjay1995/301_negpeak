@@ -52,6 +52,8 @@ static bool ParseComponentKey(Component &c, const std::string &key, const std::s
     else if(key == "active")   c.active_yn = std::atoi(val.c_str()) != 0;
     else if(key == "alarm_high") c.alarm_high = std::atof(val.c_str());
     else if(key == "alarm_low")  c.alarm_low  = std::atof(val.c_str());
+    else if(key == "dac_channel") c.dac_channel = std::atoi(val.c_str());
+    else if(key == "dac_range")   c.dac_range   = std::atof(val.c_str());
     else if(key.size() == 4 && key.compare(0, 3, "std") == 0 &&
             key[3] >= '1' && key[3] <= '0' + STAND_NUM64) {
         c.stand[key[3] - '1'] = std::atof(val.c_str());   // std1..std8
@@ -161,6 +163,15 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
                     if(!Trim(tok).empty())
                         h.point_valves.push_back(std::atoi(Trim(tok).c_str()));
             }
+            else if(key == "dac_i2c_addrs") {  // comma-separated I2C address list
+                h.dac_i2c_addrs.clear();
+                std::stringstream ss(val);
+                std::string tok;
+                while(std::getline(ss, tok, ','))
+                    if(!Trim(tok).empty())
+                        h.dac_i2c_addrs.push_back((int)std::strtol(Trim(tok).c_str(), nullptr, 0));
+            }
+            else if(key == "dac_vref") h.dac_vref = std::atof(val.c_str());
             else { err = path + ":" + std::to_string(lineno) + ": unknown hardware key '" + key + "'"; return false; }
         }
         else if(section == "tempzone" && zone) {
@@ -223,6 +234,10 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
         f << b << "active=" << (c.active_yn ? 1 : 0) << "\n";
         if(c.alarm_high > 0) { std::snprintf(b, sizeof b, "alarm_high=%g\n", c.alarm_high); f << b; }
         if(c.alarm_low  > 0) { std::snprintf(b, sizeof b, "alarm_low=%g\n",  c.alarm_low);  f << b; }
+        if(c.dac_channel >= 0 && c.dac_range > 0) {
+            std::snprintf(b, sizeof b, "dac_channel=%d\ndac_range=%g\n", c.dac_channel, c.dac_range);
+            f << b;
+        }
         for(int s = 0; s < STAND_NUM64; s++)
             if(c.stand[s] > 0) {
                 std::snprintf(b, sizeof b, "std%d=%g\n", s + 1, c.stand[s]);
@@ -269,6 +284,15 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
         for(size_t i = 0; i < h.point_valves.size(); i++)
             f << (i ? "," : "") << h.point_valves[i];
         f << "\n";
+    }
+    if(!h.dac_i2c_addrs.empty()) {
+        f << "dac_i2c_addrs=";
+        for(size_t i = 0; i < h.dac_i2c_addrs.size(); i++) {
+            std::snprintf(b, sizeof b, "0x%02X", h.dac_i2c_addrs[i]);
+            f << (i ? "," : "") << b;
+        }
+        std::snprintf(b, sizeof b, "\ndac_vref=%g\n", h.dac_vref);
+        f << b;
     }
 
     for(const TempZone &z : m.zones) {

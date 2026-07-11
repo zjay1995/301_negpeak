@@ -95,6 +95,7 @@ private:
     double ZoneTempC(const TempZone &z) const;
     void Tick(double dt);            // sleep or advance simulation
     void AllOff();
+    void WriteDacOutputs(const Method &mm, const std::vector<ReportRow> &rows) const;
 };
 
 } // namespace wpeak64

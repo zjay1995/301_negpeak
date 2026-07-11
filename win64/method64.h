@@ -38,6 +38,11 @@ struct Component {
     // concentration alarm limits (legacy H/L alarms; 0 = disabled)
     double alarm_high = 0;
     double alarm_low  = 0;
+    // analog concentration output (legacy Write_conc_to_DAC / AnalogRange):
+    // dac_channel indexes HardwareConfig::dac_i2c_addrs; dac_range is the
+    // concentration that maps to full-scale DAC output. -1 / 0 = no output.
+    int    dac_channel = -1;
+    double dac_range   = 0;
 };
 
 // Method: detector settings + run parameters + component table + hardware.

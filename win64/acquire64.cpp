@@ -70,6 +70,23 @@ void AcquireRun::AllOff()
         if(z.heater_line >= 0) h_.out->Set(z.heater_line, false);
 }
 
+// Drive each identified, calibrated component's DAC channel proportional to
+// its concentration (legacy Write_conc_to_DAC / AnalogRange): 0 V at zero
+// concentration, hw.dac_vref at Component::dac_range and above.
+void AcquireRun::WriteDacOutputs(const Method &mm, const std::vector<ReportRow> &rows) const
+{
+    if(!h_.dac) return;
+    for(const ReportRow &r : rows) {
+        if(r.component < 0 || !r.calibrated) continue;
+        const Component &c = mm.components[(size_t)r.component];
+        if(c.dac_channel < 0 || c.dac_range <= 0) continue;
+        double frac = r.concentration / c.dac_range;
+        if(frac < 0) frac = 0;
+        if(frac > 1) frac = 1;
+        h_.dac->Write(c.dac_channel, frac * mm.hw.dac_vref);
+    }
+}
+
 bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
                      AcquireProgress *progress)
 {
@@ -240,6 +257,7 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
         h_.out->Set(hw.alarm_high_line, (out.alarm_state & ALARM_HIGH) != 0);
     if(hw.alarm_low_line >= 0)
         h_.out->Set(hw.alarm_low_line, (out.alarm_state & ALARM_LOW) != 0);
+    WriteDacOutputs(m_, out.rows);
 
     if(integ_b) {
         Method mb = m_.AsDetectorB();
@@ -253,6 +271,7 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
             h_.out->Set(hw.alarm_high_line, true);
         if(hw.alarm_low_line >= 0 && (out.alarm_state_b & ALARM_LOW))
             h_.out->Set(hw.alarm_low_line, true);
+        WriteDacOutputs(mb, out.rows_b);
     }
 
     phase("DONE");

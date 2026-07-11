@@ -3,6 +3,7 @@
 #include "hw64.h"
 #include "ads1115.h"
 #include "gpio64.h"
+#include "mcp4725.h"
 #include <cmath>
 
 namespace wpeak64 {
@@ -97,6 +98,16 @@ bool SimHardware::Get(int line) const
     return line >= 0 && line < 64 ? lines_[line] : false;
 }
 
+void SimHardware::Write(int channel, double volts)
+{
+    if(channel >= 0 && channel < 16) dac_volts_[channel] = volts;
+}
+
+double SimHardware::LastVolts(int channel) const
+{
+    return channel >= 0 && channel < 16 ? dac_volts_[channel] : 0;
+}
+
 // ---- factory -----------------------------------------------------------------
 bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
                   double sim_scale, Hardware &h, std::string &err)
@@ -106,6 +117,7 @@ bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
         h.sim = new SimHardware(hw, zones, sim_scale);
         h.adc = h.sim;
         h.out = h.sim;
+        h.dac = h.sim;
         return true;
     }
     if(hw.backend == "ads1115") {
@@ -125,8 +137,15 @@ bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
         GpioOut *out = GpioOut::Open(hw.gpio_chip, lines, err);
         if(!out) { delete adc; return false; }
 
+        Mcp4725AnalogOut *dac = nullptr;
+        if(!hw.dac_i2c_addrs.empty()) {
+            dac = Mcp4725AnalogOut::Open(hw.i2c_dev, hw.dac_i2c_addrs, hw.dac_vref, err);
+            if(!dac) { delete adc; delete out; return false; }
+        }
+
         h.adc = adc;
         h.out = out;
+        h.dac = dac;
         return true;
 #else
         err = "backend=ads1115 requires Linux (i2c-dev/gpiochip); "
@@ -140,12 +159,13 @@ bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
 
 void CloseHardware(Hardware &h)
 {
-    if(h.sim) {                 // sim object serves as both interfaces
+    if(h.sim) {                 // sim object serves as adc/out/dac alike
         delete h.sim;
     }
     else {
         delete h.adc;
         delete h.out;
+        delete h.dac;
     }
     h = Hardware();
 }

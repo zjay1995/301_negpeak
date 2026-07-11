@@ -13,8 +13,8 @@ WINDRES  ?= x86_64-w64-mingw32-windres
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
 CORE = integrator64.cpp method64.cpp
-ACQ  = $(CORE) hw64.cpp acquire64.cpp ads1115.cpp gpio64.cpp runstore64.cpp
-HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h gpio64.h acquire64.h runstore64.h gainrange.h
+ACQ  = $(CORE) hw64.cpp acquire64.cpp ads1115.cpp mcp4725.cpp gpio64.cpp runstore64.cpp
+HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h mcp4725.h gpio64.h acquire64.h runstore64.h gainrange.h
 
 all: test win64
 

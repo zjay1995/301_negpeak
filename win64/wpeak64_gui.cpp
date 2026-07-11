@@ -44,6 +44,7 @@ enum {
     IDC_EL_RESPONSE = 755, IDC_EL_AHIGH = 756, IDC_EL_ALOW = 757, IDC_EL_ACTIVE = 758,
     IDC_EL_ADD = 759, IDC_EL_UPDATE = 760, IDC_EL_DELETE = 761,
     IDC_EL_APPLY = 762, IDC_EL_CANCEL = 763,
+    IDC_EL_DACCH = 764, IDC_EL_DACRANGE = 765,
     // toolbar icons reused from the original Peak Works software (wpeak64.rc)
     IDB_OPEN = 901, IDB_SAVE = 902, IDB_HELP = 903,
 };
@@ -1319,7 +1320,8 @@ static std::vector<Component> g_elem_edit;
 static HWND g_elemeditwnd = nullptr;
 static HWND g_el_list = nullptr, g_el_name = nullptr, g_el_rt = nullptr,
            g_el_window = nullptr, g_el_response = nullptr, g_el_ahigh = nullptr,
-           g_el_alow = nullptr, g_el_active = nullptr, g_el_status = nullptr;
+           g_el_alow = nullptr, g_el_active = nullptr, g_el_status = nullptr,
+           g_el_dacch = nullptr, g_el_dacrange = nullptr;
 static int g_el_selected = -1;
 
 static void RefreshElList()
@@ -1340,7 +1342,11 @@ static void RefreshElList()
         std::snprintf(buf, sizeof buf, "%g", c.response);  ListView_SetItemText(g_el_list, row, 3, buf);
         std::snprintf(buf, sizeof buf, "%g", c.alarm_high);ListView_SetItemText(g_el_list, row, 4, buf);
         std::snprintf(buf, sizeof buf, "%g", c.alarm_low); ListView_SetItemText(g_el_list, row, 5, buf);
-        ListView_SetItemText(g_el_list, row, 6, (LPSTR)(c.active_yn ? "Yes" : "No"));
+        if(c.dac_channel >= 0) std::snprintf(buf, sizeof buf, "%d", c.dac_channel);
+        else                   std::snprintf(buf, sizeof buf, "-");
+        ListView_SetItemText(g_el_list, row, 6, buf);
+        std::snprintf(buf, sizeof buf, "%g", c.dac_range); ListView_SetItemText(g_el_list, row, 7, buf);
+        ListView_SetItemText(g_el_list, row, 8, (LPSTR)(c.active_yn ? "Yes" : "No"));
     }
     if(g_el_status) {
         char buf[96];
@@ -1371,6 +1377,8 @@ static void PopulateElFields(int idx)
     SetElEditNum(g_el_response, c.response);
     SetElEditNum(g_el_ahigh, c.alarm_high);
     SetElEditNum(g_el_alow, c.alarm_low);
+    SetElEditNum(g_el_dacch, c.dac_channel);
+    SetElEditNum(g_el_dacrange, c.dac_range);
     SendMessageA(g_el_active, BM_SETCHECK, c.active_yn ? BST_CHECKED : BST_UNCHECKED, 0);
     g_el_selected = idx;
 }
@@ -1383,6 +1391,8 @@ static void ClearElFields()
     SetElEditNum(g_el_response, 0);
     SetElEditNum(g_el_ahigh, 0);
     SetElEditNum(g_el_alow, 0);
+    SetElEditNum(g_el_dacch, -1);
+    SetElEditNum(g_el_dacrange, 0);
     SendMessageA(g_el_active, BM_SETCHECK, BST_CHECKED, 0);
     g_el_selected = -1;
     ListView_SetItemState(g_el_list, -1, 0, LVIS_SELECTED);
@@ -1404,6 +1414,8 @@ static bool ReadElFieldsInto(HWND hwnd, Component &c)
     c.response    = GetElEditNum(g_el_response);
     c.alarm_high  = GetElEditNum(g_el_ahigh);
     c.alarm_low   = GetElEditNum(g_el_alow);
+    c.dac_channel = (int)GetElEditNum(g_el_dacch);
+    c.dac_range   = GetElEditNum(g_el_dacrange);
     c.active_yn   = SendMessageA(g_el_active, BM_GETCHECK, 0, 0) == BST_CHECKED;
     return true;
 }
@@ -1415,13 +1427,14 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
             g_el_list = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
                 WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
-                12, 12, 558, 200, hwnd, (HMENU)(UINT_PTR)IDC_EL_LIST, inst, nullptr);
+                12, 12, 658, 200, hwnd, (HMENU)(UINT_PTR)IDC_EL_LIST, inst, nullptr);
             ListView_SetExtendedListViewStyle(g_el_list, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
             struct { const char *t; int w; } cols[] = {
-                { "Name", 130 }, { "RT (s)", 60 }, { "Window (s)", 75 },
-                { "Response", 75 }, { "AlarmHi", 60 }, { "AlarmLo", 60 }, { "Active", 55 },
+                { "Name", 120 }, { "RT (s)", 55 }, { "Window (s)", 70 },
+                { "Response", 70 }, { "AlarmHi", 55 }, { "AlarmLo", 55 },
+                { "DAC Ch", 55 }, { "DAC Range", 70 }, { "Active", 50 },
             };
-            for(int i = 0; i < 7; i++) {
+            for(int i = 0; i < 9; i++) {
                 LVCOLUMNA col = {};
                 col.mask = LVCF_TEXT | LVCF_WIDTH;
                 col.cx = cols[i].w;
@@ -1456,6 +1469,13 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             label("Alarm Low", 172, y + 3, 70);
             g_el_alow = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                 250, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_ALOW, inst, nullptr);
+            y += 28;
+            label("DAC Channel", 12, y + 3, 90);
+            g_el_dacch = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                110, y, 60, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_DACCH, inst, nullptr);
+            label("DAC Range", 190, y + 3, 80);
+            g_el_dacrange = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                278, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_DACRANGE, inst, nullptr);
             y += 30;
             g_el_active = CreateWindowA("BUTTON", "Active",
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
@@ -1470,20 +1490,22 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 264, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_DELETE, inst, nullptr);
             y += 34;
             g_el_status = CreateWindowA("STATIC", "", WS_CHILD | WS_VISIBLE | SS_LEFT,
-                12, y, 558, 18, hwnd, nullptr, inst, nullptr);
+                12, y, 658, 18, hwnd, nullptr, inst, nullptr);
             y += 22;
             HWND note = CreateWindowA("STATIC",
-                "Standards (std1..std8) and calibration are set via the method file or Run > Start Calibration.",
-                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 558, 18, hwnd, nullptr, inst, nullptr);
-            y += 28;
+                "Standards (std1..std8) and calibration are set via the method file or Run > Start Calibration.\n"
+                "DAC Channel/Range send a 0-Vref analog output proportional to concentration (see [hardware] dac_i2c_addrs).",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 658, 32, hwnd, nullptr, inst, nullptr);
+            y += 40;
             HWND bapply = CreateWindowA("BUTTON", "Apply && Close",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-                332, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_APPLY, inst, nullptr);
+                432, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_APPLY, inst, nullptr);
             HWND bcancel = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE,
-                448, y, 100, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_CANCEL, inst, nullptr);
+                548, y, 100, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_CANCEL, inst, nullptr);
 
             for(HWND h : { g_el_name, g_el_rt, g_el_window, g_el_response, g_el_ahigh,
-                          g_el_alow, g_el_active, badd, bupd, bdel, note, bapply, bcancel })
+                          g_el_alow, g_el_dacch, g_el_dacrange, g_el_active,
+                          badd, bupd, bdel, note, bapply, bcancel })
                 SendMessageA(h, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
 
             RefreshElList();
@@ -1551,7 +1573,7 @@ static void ShowElementEditor(HINSTANCE inst)
     g_elem_edit = g_method.components;   // working copy; stand[]/cal[] preserved
     g_elemeditwnd = CreateWindowA("WPEAK64_ELEMEDIT", "WPEAK64 - Element Table (Edit Components)",
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                                  CW_USEDEFAULT, CW_USEDEFAULT, 600, 560,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, 700, 620,
                                   g_main, nullptr, inst, nullptr);
     ShowWindow(g_elemeditwnd, SW_SHOW);
 }

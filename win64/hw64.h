@@ -47,6 +47,18 @@ public:
     virtual bool Get(int line) const = 0;
 };
 
+// Analog concentration output (legacy Write_conc_to_DAC / USB-3106 etc. analog
+// output boards): one DAC channel per configured output, driven 0..Vref
+// proportional to an identified component's concentration (see
+// Component::dac_channel / dac_range in method64.h). "channel" indexes
+// HardwareConfig::dac_i2c_addrs.
+class AnalogOut {
+public:
+    virtual ~AnalogOut() {}
+    virtual void Write(int channel, double volts) = 0;
+    virtual double LastVolts(int channel) const { (void)channel; return 0; }
+};
+
 // ---- configuration (parsed from the method file [hardware] section) ---------
 struct HardwareConfig {
     std::string backend   = "sim";          // "sim" or "ads1115"
@@ -73,6 +85,12 @@ struct HardwareConfig {
     // concentration alarm relays (common across points, as legacy COMMON_HIGH)
     int alarm_high_line = -1;
     int alarm_low_line  = -1;
+
+    // DAC analog concentration outputs (MCP4725 12-bit I2C DAC, one chip per
+    // channel -- legacy Write_conc_to_DAC's per-port analog output boards).
+    // Empty = no analog outputs configured.
+    std::vector<int> dac_i2c_addrs;   // I2C address per DAC channel index
+    double dac_vref = 3.3;            // DAC full-scale output voltage
 };
 
 // One controlled temperature zone (oven, injector, detector...), read via an
@@ -107,7 +125,7 @@ struct TimingConfig {
 // Detector channel: baseline + gaussian peaks scaled by sim_scale (and only
 // present after an injection). Temperature channels: first-order thermal
 // model responding to the heater lines. Deterministic noise.
-class SimHardware : public Adc, public DigitalOut {
+class SimHardware : public Adc, public DigitalOut, public AnalogOut {
 public:
     SimHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,
                 double sim_scale);
@@ -118,6 +136,9 @@ public:
     // DigitalOut
     void Set(int line, bool on) override;
     bool Get(int line) const override;
+    // AnalogOut (recorded only -- nothing physical to drive in simulation)
+    void   Write(int channel, double volts) override;
+    double LastVolts(int channel) const override;
 
     // advance simulated time; the acquisition loop calls this instead of
     // sleeping, so simulated runs execute instantly.
@@ -138,6 +159,7 @@ private:
     double t_ = 0;                 // simulated seconds
     double inject_t_ = -1;         // time of injection, -1 = none yet
     bool   lines_[64] = {};
+    double dac_volts_[16] = {};
     unsigned rng_ = 20260709;
 
     double DetectorVolts();
@@ -149,6 +171,7 @@ private:
 struct Hardware {
     Adc        *adc = nullptr;
     DigitalOut *out = nullptr;
+    AnalogOut  *dac = nullptr;     // null when no DAC outputs configured
     SimHardware *sim = nullptr;    // non-null when backend=="sim"
 };
 bool OpenHardware(const HardwareConfig &hw, const std::vector<TempZone> &zones,

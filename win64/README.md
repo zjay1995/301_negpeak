@@ -79,6 +79,36 @@ An optional detector **autozero** (legacy `Acquire::AutoZero`) runs between
 equilibration and sampling: set `autozero=<gpio>` in `[hardware]` and
 `autozero_time=<s>` in `[timing]`.
 
+## Detector B (dual detector)
+
+Legacy `NUMDETECTORS=2`: a second, fully independent detector — its own
+segment width/noise window/MinHeight/MinArea/peak algorithm, `detect_meth`,
+component table and ADC channel — sampled in the same ANALYZE loop as
+detector A (`analysis_time`/`data_rate` are shared; everything else is
+separate). Enable it with `[detector_b]` + `enabled=1` + `adc_channel=`,
+and a `[component_b]` table (same keys as `[component]`). Every path that
+handles detector A's results also handles detector B's: run output prints
+a second "Detector B" peak table, `history` shows a `DetB` summary column,
+`SaveRun` writes `trace_b.csv`/`report_b.csv` alongside the normal per-run
+files, and calibration runs update `[component_b]` standards the same way
+`-s N` updates `[component]`. The GUI Settings dialog has an "Enable
+Detector B" checkbox with its ADC channel/min height/detect method, and
+the status bar shows its live peak count/alarm state.
+
+## Analog concentration outputs (DAC)
+
+Legacy `Write_conc_to_DAC` / USB-3106-class analog output boards, ported
+onto commodity MCP4725 12-bit I2C DACs (`mcp4725.cpp`, one chip per output
+channel — Linux `i2c-dev`, same pattern as the ADS1115 driver). Configure
+`dac_i2c_addrs=<addr,addr,...>` and `dac_vref=<V>` in `[hardware]`, then
+give a component `dac_channel=<index>` (into that list) and `dac_range=
+<conc>` (the concentration that maps to `dac_vref` at the DAC). After every
+run, each identified/calibrated component with a DAC channel gets written
+0 V at zero concentration up to `dac_vref` at `dac_range` (clamped), for
+both detector A and B. `wpeak64_acq monitor` shows the last-written volts
+per channel; the GUI Element Table editor has DAC Channel/DAC Range
+columns next to the alarm limits.
+
 ## TWA / STEL
 
 `wpeak64_acq twa -j jobdir` computes the exposure report over the stored
@@ -131,9 +161,11 @@ peaks never calibrate or quantify.
 
 ## What is NOT ported
 
-The Borland OWL GUI (≈40 windows/dialogs), Modbus, TWA/STEL reporting,
-and the legacy binary job/method file formats. Those layers are tied to
-Win16/32-era Borland C++; a full port would be a separate project.
+The Borland OWL GUI (≈40 windows/dialogs, replaced here with a single
+native Win32/GDI window), Modbus remote control, and the legacy binary
+job/method file formats (replaced with the INI/CSV formats documented
+above). Those layers are tied to Win16/32-era Borland C++; a full
+byte-for-byte port would be a separate project.
 
 ## Programs
 

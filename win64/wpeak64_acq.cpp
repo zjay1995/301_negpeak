@@ -69,6 +69,9 @@ static int Monitor(const Method &m, Hardware &h, int seconds)
             std::printf("  %s=%.1fC(heat=%d)", z.name.c_str(), t,
                         z.heater_line >= 0 ? (int)h.out->Get(z.heater_line) : 0);
         }
+        if(h.dac)
+            for(size_t d = 0; d < m.hw.dac_i2c_addrs.size(); d++)
+                std::printf("  dac[%zu]=%.3fV", d, h.dac->LastVolts((int)d));
         std::printf("\n");
         if(h.sim) h.sim->AdvanceSeconds(1.0);
         else      std::this_thread::sleep_for(std::chrono::seconds(1));
