@@ -21,15 +21,21 @@ double AcquireRun::ZoneTempC(const TempZone &z) const
     return z.scale * volts + z.offset;
 }
 
+double AcquireRun::EffectiveSetpoint(const TempZone &z) const
+{
+    return z.program.Enabled() ? ProgramTarget(z.program, t_since_inject_) : z.setpoint_c;
+}
+
 void AcquireRun::ServiceTempZones()
 {
     for(const TempZone &z : m_.zones) {
-        if(z.setpoint_c <= 0 || z.heater_line < 0) continue;
+        double sp = EffectiveSetpoint(z);
+        if(sp <= 0 || z.heater_line < 0) continue;
         double t = ZoneTempC(z);
         // bang-bang with hysteresis, as the legacy oven relay control
-        if(t < z.setpoint_c - z.hysteresis_c)
+        if(t < sp - z.hysteresis_c)
             h_.out->Set(z.heater_line, true);
-        else if(t > z.setpoint_c + z.hysteresis_c)
+        else if(t > sp + z.hysteresis_c)
             h_.out->Set(z.heater_line, false);
     }
 }
@@ -37,9 +43,10 @@ void AcquireRun::ServiceTempZones()
 bool AcquireRun::ZonesInBand() const
 {
     for(const TempZone &z : m_.zones) {
-        if(z.setpoint_c <= 0) continue;
+        double sp = EffectiveSetpoint(z);
+        if(sp <= 0) continue;
         double t = ZoneTempC(z);
-        if(std::fabs(t - z.setpoint_c) > z.hysteresis_c)
+        if(std::fabs(t - sp) > z.hysteresis_c)
             return false;
     }
     return true;
@@ -196,6 +203,7 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
 
     // --- ANALYZE --- (retention clock starts at injection)
     phase("ANALYZE");
+    t_since_inject_ = 0;   // starts the oven temperature program, if any
     Integrator integ(m_.det, m_.data_rate, m_.analysis_time);
     out.has_b = m_.det_b_enabled && m_.det_b_adc_channel >= 0;
     // Detector B (legacy NUMDETECTORS=2): an independent integrator sampled
@@ -223,6 +231,7 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
                 if(progress) progress->OnLivePeaksB(integ_b->peaks, integ_b->act_thresh);
             }
             if(i % (m_.data_rate * 5) == 0) {        // service heaters ~5 s
+                t_since_inject_ = (double)i / m_.data_rate;
                 ServiceTempZones();
                 if(progress)
                     for(const TempZone &z : m_.zones)

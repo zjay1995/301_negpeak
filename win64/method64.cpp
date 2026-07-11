@@ -183,6 +183,16 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "hysteresis")  zone->hysteresis_c = std::atof(val.c_str());
             else if(key == "scale")       zone->scale        = std::atof(val.c_str());
             else if(key == "offset")      zone->offset       = std::atof(val.c_str());
+            // optional oven temperature program (legacy TCTRL.CPP -- see
+            // tempprogram.h); a run's initial equilibration targets
+            // prog_initial_temp instead of setpoint when any of these are set.
+            else if(key == "prog_initial_temp") zone->program.initial_temp_c   = std::atof(val.c_str());
+            else if(key == "prog_initial_hold") zone->program.initial_hold_s   = std::atol(val.c_str());
+            else if(key == "prog_ramp1_rate")   zone->program.ramp1_rate_c_min = std::atof(val.c_str());
+            else if(key == "prog_temp2")        zone->program.temp2_c          = std::atof(val.c_str());
+            else if(key == "prog_hold2")        zone->program.hold2_s          = std::atol(val.c_str());
+            else if(key == "prog_ramp2_rate")   zone->program.ramp2_rate_c_min = std::atof(val.c_str());
+            else if(key == "prog_temp3")        zone->program.temp3_c          = std::atof(val.c_str());
             else { err = path + ":" + std::to_string(lineno) + ": unknown tempzone key '" + key + "'"; return false; }
         }
         else if(section == "timing") {
@@ -302,6 +312,15 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
         std::snprintf(b, sizeof b, "setpoint=%g\nhysteresis=%g\nscale=%g\noffset=%g\n",
                       z.setpoint_c, z.hysteresis_c, z.scale, z.offset);
         f << b;
+        if(z.program.Enabled()) {
+            char pb[256];
+            std::snprintf(pb, sizeof pb,
+                "prog_initial_temp=%g\nprog_initial_hold=%ld\nprog_ramp1_rate=%g\n"
+                "prog_temp2=%g\nprog_hold2=%ld\nprog_ramp2_rate=%g\nprog_temp3=%g\n",
+                z.program.initial_temp_c, z.program.initial_hold_s, z.program.ramp1_rate_c_min,
+                z.program.temp2_c, z.program.hold2_s, z.program.ramp2_rate_c_min, z.program.temp3_c);
+            f << pb;
+        }
     }
 
     const TimingConfig &t = m.timing;

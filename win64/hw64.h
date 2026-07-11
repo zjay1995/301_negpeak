@@ -19,6 +19,7 @@
 #ifndef HW64_H
 #define HW64_H
 
+#include "tempprogram.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -106,6 +107,12 @@ struct TempZone {
     // (e.g. LM35: scale=100, offset=0; TMP36: scale=100, offset=-50)
     double scale  = 100;
     double offset = 0;
+
+    // optional oven temperature program (legacy TCTRL.CPP -- see
+    // tempprogram.h); when program.Enabled() the moving ProgramTarget()
+    // is used instead of the flat setpoint_c above, both for equilibration
+    // (initial hold, before injection) and during the run.
+    TempProgram program;
 };
 
 // Run phase timing (legacy method_table times), seconds.

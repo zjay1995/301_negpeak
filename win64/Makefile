@@ -17,19 +17,25 @@ ACQ  = $(CORE) hw64.cpp acquire64.cpp ads1115.cpp mcp4725.cpp gpio64.cpp runstor
 # Modbus TCP is only linked into wpeak64_acq (not the GUI, which has no need
 # for it yet) since it needs -lws2_32 on the Windows build.
 MODBUS = modbus64.cpp
-HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h mcp4725.h gpio64.h acquire64.h runstore64.h gainrange.h modbus64.h
+HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h mcp4725.h gpio64.h acquire64.h runstore64.h gainrange.h modbus64.h tempprogram.h
 
 all: test win64
 
-test: build/wpeak64_cli build/wpeak64_acq build/gainrange_test build/modbus64_test
+test: build/wpeak64_cli build/wpeak64_acq build/gainrange_test build/modbus64_test build/tempprogram_test
 	./build/wpeak64_cli
 	./build/gainrange_test
 	./build/modbus64_test
+	./build/tempprogram_test
 
 # pure ADS1115 auto-ranging logic, no I2C/hardware needed (see gainrange.h)
 build/gainrange_test: gainrange_test.cpp gainrange.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) gainrange_test.cpp -o $@
+
+# pure oven temperature program logic, no hardware needed (see tempprogram.h)
+build/tempprogram_test: tempprogram_test.cpp tempprogram.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) tempprogram_test.cpp -o $@
 
 # Modbus TCP wire-protocol test: a client thread and Poll() in the same
 # process, no wpeak64_acq/hardware timing involved (see modbus64_test.cpp)

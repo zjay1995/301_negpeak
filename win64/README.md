@@ -85,6 +85,39 @@ An optional detector **autozero** (legacy `Acquire::AutoZero`) runs between
 equilibration and sampling: set `autozero=<gpio>` in `[hardware]` and
 `autozero_time=<s>` in `[timing]`.
 
+## Oven temperature programming
+
+A `[tempzone]` can carry an optional multi-ramp profile (legacy
+`TCTRL.CPP`'s `T_HOLD1 -> T_RAMP1 -> T_HOLD2 -> T_RAMP2 -> T_HOLD3` state
+machine, `tempprogram.h`) instead of a single flat `setpoint`, so a run can
+start the oven cool for better resolution of early, volatile peaks and ramp
+it up during the run to elute high-boiling components faster -- standard GC
+practice. Configure it alongside a zone's existing keys:
+
+```ini
+[tempzone]
+name=oven
+adc_channel=1
+heater_line=24
+hysteresis=2
+prog_initial_temp=40      # hold at 40C ...
+prog_initial_hold=60      # ... for 60s
+prog_ramp1_rate=10        # then ramp at 10 C/min (either sign; cooling ramps work too)
+prog_temp2=100            # ... up to 100C
+prog_hold2=30             # hold there for 30s
+prog_ramp2_rate=20        # then ramp at 20 C/min
+prog_temp3=250            # ... up to 250C, held for the rest of the run
+```
+
+The oven equilibrates at `prog_initial_temp` before the run starts (not
+`setpoint`), and the ramp clock starts at injection, matching the
+retention-time clock. Any trailing stage left at its default (a rate or
+temperature of 0) just holds at the last configured temperature instead of
+requiring every field to be filled in -- e.g. `prog_initial_temp` +
+`prog_initial_hold` alone is a plain isothermal run, and a two-segment
+program only needs `prog_ramp1_rate`/`prog_temp2`. A zone without any
+`prog_*` keys behaves exactly as before (flat `setpoint`).
+
 ## Detector B (dual detector)
 
 Legacy `NUMDETECTORS=2`: a second, fully independent detector — its own
