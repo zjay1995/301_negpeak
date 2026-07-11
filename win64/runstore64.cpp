@@ -59,6 +59,15 @@ bool SaveRun(const std::string &jobdir, const Method &m,
     rec.alarm     = alarm_state == ALARM_NONE ? "" :
                     alarm_state == ALARM_HIGH ? "HIGH" :
                     alarm_state == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
+    rec.has_b     = res.has_b;
+    if(res.has_b) {
+        rec.noise_b    = res.noise_b;
+        rec.baseline_b = res.baseline_b;
+        rec.npeaks_b   = (int)res.rows_b.size();
+        rec.alarm_b    = res.alarm_state_b == ALARM_NONE ? "" :
+                         res.alarm_state_b == ALARM_HIGH ? "HIGH" :
+                         res.alarm_state_b == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
+    }
     char dbuf[32];
     std::snprintf(dbuf, sizeof dbuf, "run_%06d", rec.run_num);
     rec.dir = dbuf;
@@ -79,6 +88,12 @@ bool SaveRun(const std::string &jobdir, const Method &m,
           << "baseline=" << rec.baseline << "\n"
           << "peaks=" << rec.npeaks << "\n"
           << "alarm=" << rec.alarm << "\n";
+        if(res.has_b)
+            f << "detector_b=1\n"
+              << "noise_b=" << rec.noise_b << "\n"
+              << "baseline_b=" << rec.baseline_b << "\n"
+              << "peaks_b=" << rec.npeaks_b << "\n"
+              << "alarm_b=" << rec.alarm_b << "\n";
     }
     { // trace.csv
         std::ofstream f(rundir + "/trace.csv");
@@ -91,17 +106,34 @@ bool SaveRun(const std::string &jobdir, const Method &m,
                        res.noise, res.baseline, err))
         return false;
 
+    if(res.has_b) {
+        Method mb = m.AsDetectorB();
+        { // trace_b.csv
+            std::ofstream f(rundir + "/trace_b.csv");
+            if(!f) { err = "cannot write " + rundir + "/trace_b.csv"; return false; }
+            f << "time_s,counts\n";
+            for(size_t i = 0; i < res.trace_b.size(); i++)
+                f << (double)i / m.data_rate << "," << res.trace_b[i] << "\n";
+        }
+        if(!WriteReportCsv(rundir + "/report_b.csv", res.rows_b, mb,
+                           res.noise_b, res.baseline_b, err))
+            return false;
+    }
+
     { // append to the run list
         std::string listpath = jobdir + "/runlist.csv";
         bool fresh = !std::ifstream(listpath);
         std::ofstream f(listpath, std::ios::app);
         if(!f) { err = "cannot append " + listpath; return false; }
         if(fresh)
-            f << "num,dir,time,type,point,standard,noise,baseline,peaks,alarm\n";
+            f << "num,dir,time,type,point,standard,noise,baseline,peaks,alarm,"
+                 "has_b,noise_b,baseline_b,peaks_b,alarm_b\n";
         f << rec.run_num << "," << rec.dir << "," << rec.timestamp << ","
           << rec.type << "," << rec.point << "," << rec.standard << ","
           << rec.noise << "," << rec.baseline << "," << rec.npeaks << ","
-          << rec.alarm << "\n";
+          << rec.alarm << ","
+          << (rec.has_b ? 1 : 0) << "," << rec.noise_b << "," << rec.baseline_b << ","
+          << rec.npeaks_b << "," << rec.alarm_b << "\n";
     }
     return true;
 }
@@ -116,14 +148,22 @@ bool LoadRunList(const std::string &jobdir, std::vector<RunRecord> &out,
     std::getline(f, line);                    // header
     while(std::getline(f, line)) {
         RunRecord r;
-        char dir[64] = "", time[40] = "", type[16] = "", alarm[16] = "";
-        // alarm may be empty -> %15[^\n,] can fail; parse leniently
+        char dir[64] = "", time[40] = "", type[16] = "", alarm[16] = "", alarm_b[16] = "";
+        int has_b = 0;
+        // alarm/alarm_b may be empty -> %15[^,] can fail there; parse leniently.
+        // Trailing has_b/noise_b/baseline_b/peaks_b/alarm_b columns are absent
+        // in run lists written before Detector B support -- n>=9 still parses
+        // those older lines fine (has_b defaults to false).
         int n = std::sscanf(line.c_str(),
-                            "%d,%63[^,],%39[^,],%15[^,],%d,%d,%ld,%ld,%d,%15s",
+                            "%d,%63[^,],%39[^,],%15[^,],%d,%d,%ld,%ld,%d,%15[^,],"
+                            "%d,%ld,%ld,%d,%15s",
                             &r.run_num, dir, time, type, &r.point, &r.standard,
-                            &r.noise, &r.baseline, &r.npeaks, alarm);
+                            &r.noise, &r.baseline, &r.npeaks, alarm,
+                            &has_b, &r.noise_b, &r.baseline_b, &r.npeaks_b, alarm_b);
         if(n >= 9) {
             r.dir = dir; r.timestamp = time; r.type = type; r.alarm = alarm;
+            if(n >= 14) r.has_b = has_b != 0;
+            if(n >= 15) r.alarm_b = alarm_b;
             out.push_back(r);
         }
         else {

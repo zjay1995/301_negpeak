@@ -56,6 +56,13 @@ static int Monitor(const Method &m, Hardware &h, int seconds)
                     det, h.adc->CountsToVolts(det));
         int range = h.adc->CurrentRangeMv(m.hw.adc_channel);
         if(range) std::printf(" [%dmV]", range);   // active PGA range, ads1115 only
+        if(m.det_b_enabled && m.det_b_adc_channel >= 0) {
+            long detb = h.adc->ReadCounts(m.det_b_adc_channel);
+            std::printf("  detB[ch%d]=%6ld (%.4f V)", m.det_b_adc_channel,
+                        detb, h.adc->CountsToVolts(detb));
+            int rangeb = h.adc->CurrentRangeMv(m.det_b_adc_channel);
+            if(rangeb) std::printf(" [%dmV]", rangeb);
+        }
         for(const TempZone &z : m.zones) {
             long c = h.adc->ReadCounts(z.adc_channel);
             double t = z.scale * h.adc->CountsToVolts(c) + z.offset;
@@ -69,15 +76,12 @@ static int Monitor(const Method &m, Hardware &h, int seconds)
     return 0;
 }
 
-static void PrintRows(const Method &m, const AcquireResult &res, int point)
+static void PrintRowTable(const Method &m, const std::vector<ReportRow> &rows)
 {
-    std::printf("\nPoint %d   Noise=%ld  Baseline=%ld%s\n", point,
-                res.noise, res.baseline,
-                res.alarm_state ? "   *** ALARM ***" : "");
     std::printf("%-5s %-14s %-8s %-9s %-11s %-12s %-6s %s\n",
                 "Num", "Component", "RT (s)", "Height", "Area", "Concentr.",
                 "Alarm", "Type");
-    for(const ReportRow &r : res.rows) {
+    for(const ReportRow &r : rows) {
         const Peak &p = r.peak;
         bool neg = p.Height < 0;
         char num[8], conc[24];
@@ -92,6 +96,21 @@ static void PrintRows(const Method &m, const AcquireResult &res, int point)
                     num, r.name.c_str(), (double)p.Time / m.data_rate,
                     p.Height, p.Area, conc, alarm,
                     neg ? "NEGATIVE (not quantified)" : "positive");
+    }
+}
+
+static void PrintRows(const Method &m, const AcquireResult &res, int point)
+{
+    std::printf("\nPoint %d   Noise=%ld  Baseline=%ld%s\n", point,
+                res.noise, res.baseline,
+                res.alarm_state ? "   *** ALARM ***" : "");
+    PrintRowTable(m, res.rows);
+
+    if(res.has_b) {
+        std::printf("\nDetector B   Noise=%ld  Baseline=%ld%s\n",
+                    res.noise_b, res.baseline_b,
+                    res.alarm_state_b ? "   *** ALARM ***" : "");
+        PrintRowTable(m.AsDetectorB(), res.rows_b);
     }
 }
 
@@ -242,14 +261,21 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "error: %s\n", err.c_str());
             return 2;
         }
-        std::printf("%-6s %-20s %-5s %-6s %-4s %-8s %-9s %-6s %s\n",
+        std::printf("%-6s %-20s %-5s %-6s %-4s %-8s %-9s %-6s %-9s %s\n",
                     "Num", "Time", "Type", "Point", "Std", "Noise", "Baseline",
-                    "Peaks", "Alarm");
-        for(const RunRecord &r : hist)
-            std::printf("%-6d %-20s %-5s %-6d %-4d %-8ld %-9ld %-6d %s\n",
+                    "Peaks", "Alarm", "DetB");
+        for(const RunRecord &r : hist) {
+            std::string detb = "-";
+            if(r.has_b) {
+                detb = "N=" + std::to_string(r.noise_b) + " B=" + std::to_string(r.baseline_b) +
+                       " Pk=" + std::to_string(r.npeaks_b) +
+                       (r.alarm_b.empty() ? "" : " " + r.alarm_b);
+            }
+            std::printf("%-6d %-20s %-5s %-6d %-4d %-8ld %-9ld %-6d %-9s %s\n",
                         r.run_num, r.timestamp.c_str(), r.type.c_str(), r.point,
                         r.standard, r.noise, r.baseline, r.npeaks,
-                        r.alarm.c_str());
+                        r.alarm.c_str(), detb.c_str());
+        }
         std::printf("%zu run(s) in %s\n", hist.size(), jobdir.c_str());
         return 0;
     }

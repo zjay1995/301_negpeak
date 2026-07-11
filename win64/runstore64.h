@@ -35,6 +35,12 @@ struct RunRecord {
     long        noise = 0, baseline = 0;
     int         npeaks = 0;
     std::string alarm;           // "", "HIGH", "LOW", "HIGH+LOW"
+
+    // ---- Detector B (only meaningful when has_b) -----------------------------
+    bool        has_b = false;
+    long        noise_b = 0, baseline_b = 0;
+    int         npeaks_b = 0;
+    std::string alarm_b;
 };
 
 // Persist one completed acquisition into the job directory (created if

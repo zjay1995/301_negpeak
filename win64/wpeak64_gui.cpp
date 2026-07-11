@@ -53,6 +53,11 @@ static Method                 g_method;
 static std::vector<long>      g_trace;
 static std::vector<ReportRow> g_rows;
 static long                   g_noise = 0, g_baseline = 0;
+// ---- Detector B (only meaningful when g_has_b) -----------------------------
+static bool                   g_has_b = false;
+static std::vector<long>      g_trace_b;
+static std::vector<ReportRow> g_rows_b;
+static long                   g_noise_b = 0, g_baseline_b = 0;
 static std::string            g_data_path;    // empty = synthetic demo
 static std::string            g_method_path;  // empty = defaults
 static std::string            g_cal_path;     // calibration file (optional)
@@ -733,6 +738,14 @@ static void PaintMain(HDC dc, const RECT &rc)
                    alarm == ALARM_HIGH ? "ALARM HIGH" :
                    alarm == ALARM_LOW  ? "ALARM LOW"  : "ALARM HIGH+LOW");
     segs.push_back(running ? "ACQ " + phase : "ACQ idle");
+    if(g_has_b) {
+        int alarm_b = ALARM_NONE;
+        for(const ReportRow &r : g_rows_b) alarm_b |= r.alarm;
+        segs.push_back("DET B " + std::to_string(g_rows_b.size()) + " pk" +
+                       (alarm_b ? " *ALARM*" : ""));
+    }
+    else if(g_method.det_b_enabled)
+        segs.push_back("DET B armed");
     segs.push_back("DATA " + std::string(g_data_path.empty() ? "none"
                                          : BaseName(g_data_path).c_str()));
     segs.push_back("METHOD " + std::string(g_method_path.empty() ? "defaults"
@@ -1628,6 +1641,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         std::string err;
                         if(!WriteReportCsv(p, g_rows, g_method, g_noise, g_baseline, err))
                             MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
+                        else if(g_has_b) {
+                            // sibling "<name>_b.csv" next to the detector A report
+                            std::string pb = p;
+                            size_t dot = pb.find_last_of('.');
+                            if(dot == std::string::npos) pb += "_b";
+                            else pb.insert(dot, "_b");
+                            if(!WriteReportCsv(pb, g_rows_b, g_method.AsDetectorB(),
+                                               g_noise_b, g_baseline_b, err))
+                                MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
+                        }
                     }
                     return 0;
                 }
@@ -1664,11 +1687,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_rows     = res.rows;
                 g_noise    = res.noise;
                 g_baseline = res.baseline;
+                g_has_b     = res.has_b;
+                g_trace_b   = res.trace_b;
+                g_rows_b    = res.rows_b;
+                g_noise_b   = res.noise_b;
+                g_baseline_b = res.baseline_b;
                 char title[256];
                 std::snprintf(title, sizeof title,
                               "GC301c - WPEAK64 - acquired %s%s",
                               was_cal ? "calibration run" : "run",
-                              res.alarm_state ? "  *** ALARM ***" : "");
+                              (res.alarm_state | res.alarm_state_b) ? "  *** ALARM ***" : "");
                 SetWindowTextA(hwnd, title);
             }
             InvalidateRect(hwnd, nullptr, FALSE);   // element table is part of g_main now
