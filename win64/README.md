@@ -109,6 +109,27 @@ both detector A and B. `wpeak64_acq monitor` shows the last-written volts
 per channel; the GUI Element Table editor has DAC Channel/DAC Range
 columns next to the alarm limits.
 
+## Remote monitoring (Modbus TCP)
+
+The legacy `MODBUS.CPP`/`GetModBusRegister` was a serial Modbus ASCII slave
+(function codes 0x03/0x04 only) packing each component's concentration as a
+32-bit float across two registers. This port serves the same register
+layout over standard **Modbus TCP** (`modbus64.cpp`) instead, since that's
+what SCADA/PLC integrators expect today: `--modbus-port N` on `run`, `cal`,
+`continuous` or `monitor` starts a listener on port `N` and updates the
+register table after every completed run (function codes 3 "Read Holding
+Registers" and 4 "Read Input Registers" answer identically, as the legacy
+slave did). Registers are packed two-per-component, high word first, in
+method order — detector A's components first, then detector B's when
+`det_b_enabled` — so `register[2*i]:register[2*i+1]` is component `i`'s
+current concentration (0.0 for unmatched/negative/uncalibrated peaks):
+
+```sh
+wpeak64_acq -m method.ini continuous -j jobdir --modbus-port 502
+# from a Modbus TCP master, e.g.:
+mbpoll -m tcp -a 1 -t 4:float -r 1 -c 2 127.0.0.1 -p 502
+```
+
 ## TWA / STEL
 
 `wpeak64_acq twa -j jobdir` computes the exposure report over the stored
@@ -162,10 +183,13 @@ peaks never calibrate or quantify.
 ## What is NOT ported
 
 The Borland OWL GUI (≈40 windows/dialogs, replaced here with a single
-native Win32/GDI window), Modbus remote control, and the legacy binary
-job/method file formats (replaced with the INI/CSV formats documented
-above). Those layers are tied to Win16/32-era Borland C++; a full
-byte-for-byte port would be a separate project.
+native Win32/GDI window) and the legacy binary job/method file formats
+(replaced with the INI/CSV formats documented above) are not byte-for-byte
+ported — those layers are tied to Win16/32-era Borland C++, and a faithful
+reproduction would be a separate project. Functionally-equivalent modern
+replacements exist for everything else described in this document
+(Modbus TCP instead of the legacy serial ASCII slave, MCP4725 I2C DACs
+instead of the legacy USB analog output boards, etc.).
 
 ## Programs
 

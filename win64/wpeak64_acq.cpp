@@ -35,6 +35,7 @@
 #include "method64.h"
 #include "acquire64.h"
 #include "runstore64.h"
+#include "modbus64.h"
 #include <cstdio>
 #include <cstring>
 #include <csignal>
@@ -48,9 +49,10 @@ using namespace wpeak64;
 static volatile std::sig_atomic_t g_stop = 0;
 static void OnSigInt(int) { g_stop = 1; }
 
-static int Monitor(const Method &m, Hardware &h, int seconds)
+static int Monitor(const Method &m, Hardware &h, int seconds, ModbusServer *modbus = nullptr)
 {
     for(int s = 0; s < seconds; s++) {
+        if(modbus) { std::string merr; modbus->Poll(merr); }
         long det = h.adc->ReadCounts(m.hw.adc_channel);
         std::printf("t=%3ds  det[ch%d]=%6ld (%.4f V)", s, m.hw.adc_channel,
                     det, h.adc->CountsToVolts(det));
@@ -124,11 +126,15 @@ public:
 };
 
 // One acquisition (run or cal) with printing, persistence, cal update.
+// modbus, if non-null, gets the latest concentrations after every run so a
+// polling SCADA/PLC master always sees current data (legacy GetModBusRegister
+// semantics -- see modbus64.h).
 static int DoOneRun(Method &m, Hardware &h, bool is_cal, int standard,
                     int point, const std::string &cal_path,
                     const std::string &jobdir,
                     const std::string &report_path,
-                    const std::string &trace_path)
+                    const std::string &trace_path,
+                    ModbusServer *modbus = nullptr)
 {
     std::string err;
     StopCheck stop;
@@ -139,6 +145,9 @@ static int DoOneRun(Method &m, Hardware &h, bool is_cal, int standard,
         return 1;
     }
     PrintRows(m, res, point);
+    if(modbus)
+        modbus->SetRegisters(BuildModbusRegisters(m, res.rows,
+                                                   res.has_b ? &res.rows_b : nullptr));
 
     int rc = 0;
     if(is_cal) {
@@ -179,7 +188,7 @@ static int DoOneRun(Method &m, Hardware &h, bool is_cal, int standard,
 int main(int argc, char **argv)
 {
     std::string method_path, cal_path, report_path, trace_path, jobdir, mode;
-    int standard_num = 0, monitor_s = 10, point = 1, max_runs = 0;
+    int standard_num = 0, monitor_s = 10, point = 1, max_runs = 0, modbus_port = 0;
     bool force_sim = false;
     double sim_scale = 1.0;
 
@@ -199,6 +208,7 @@ int main(int argc, char **argv)
         else if(!std::strcmp(argv[i], "-t"))  monitor_s   = std::atoi(need("-t"));
         else if(!std::strcmp(argv[i], "--sim"))       force_sim = true;
         else if(!std::strcmp(argv[i], "--sim-scale")) sim_scale = std::atof(need("--sim-scale"));
+        else if(!std::strcmp(argv[i], "--modbus-port")) modbus_port = std::atoi(need("--modbus-port"));
         else if(argv[i][0] != '-' && mode.empty())    mode = argv[i];
         else {
             std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
@@ -293,7 +303,9 @@ int main(int argc, char **argv)
             "  cal         -s N [-C cal.ini] [-j jobdir]    (N = standard 1..%d)\n"
             "  continuous  [-C cal.ini] [-j jobdir] [-n maxruns]\n"
             "  monitor     [-t seconds]\n"
-            "  --sim / --sim-scale X  simulation backend\n",
+            "  --sim / --sim-scale X  simulation backend\n"
+            "  --modbus-port N  serve concentrations over Modbus TCP on port N\n"
+            "                   (function codes 3/4; see modbus64.h for the register map)\n",
             argv[0], argv[0], STAND_NUM64);
         return 2;
     }
@@ -321,13 +333,27 @@ int main(int argc, char **argv)
     }
     std::signal(SIGINT, OnSigInt);
 
+    ModbusServer modbus;
+    ModbusServer *modbus_p = nullptr;
+    if(modbus_port > 0) {
+        if(!modbus.Start(modbus_port, err)) {
+            std::fprintf(stderr, "error: %s\n", err.c_str());
+            CloseHardware(h);
+            return 2;
+        }
+        std::vector<ReportRow> empty_b;
+        modbus.SetRegisters(BuildModbusRegisters(m, {}, m.det_b_enabled ? &empty_b : nullptr));
+        modbus_p = &modbus;
+        std::printf("Modbus TCP server listening on port %d (function codes 3/4)\n", modbus_port);
+    }
+
     int rc = 0;
     if(mode == "monitor") {
-        rc = Monitor(m, h, monitor_s);
+        rc = Monitor(m, h, monitor_s, modbus_p);
     }
     else if(mode == "run") {
         rc = DoOneRun(m, h, false, 0, point, cal_path, jobdir,
-                      report_path, trace_path);
+                      report_path, trace_path, modbus_p);
     }
     else if(mode == "cal") {
         if(standard_num < 1 || standard_num > STAND_NUM64) {
@@ -336,7 +362,7 @@ int main(int argc, char **argv)
             return 2;
         }
         rc = DoOneRun(m, h, true, standard_num, point, cal_path, jobdir,
-                      report_path, trace_path);
+                      report_path, trace_path, modbus_p);
     }
     else {   // continuous: cycle points, pause repeat_interval, auto-cal
         int points = m.hw.point_valves.empty() ? 1 : (int)m.hw.point_valves.size();
@@ -352,13 +378,13 @@ int main(int argc, char **argv)
                 std::printf("\n--- auto-calibration (standard %d) ---\n",
                             m.timing.auto_cal_standard);
                 rc |= DoOneRun(m, h, true, m.timing.auto_cal_standard, 1,
-                               cal_path, jobdir, "", "");
+                               cal_path, jobdir, "", "", modbus_p);
                 runs_since_cal = 0;
                 if(g_stop) break;
             }
             for(int p = 1; p <= points && !g_stop; p++) {
                 std::printf("\n--- run %d, point %d ---\n", runs_done + 1, p);
-                rc |= DoOneRun(m, h, false, 0, p, cal_path, jobdir, "", "");
+                rc |= DoOneRun(m, h, false, 0, p, cal_path, jobdir, "", "", modbus_p);
                 runs_done++;
                 runs_since_cal++;
                 if(max_runs && runs_done >= max_runs) break;
@@ -367,8 +393,10 @@ int main(int argc, char **argv)
             if(m.timing.repeat_interval > 0) {   // pause between cycles
                 if(h.sim) h.sim->AdvanceSeconds((double)m.timing.repeat_interval);
                 else
-                    for(long s = 0; s < m.timing.repeat_interval && !g_stop; s++)
+                    for(long s = 0; s < m.timing.repeat_interval && !g_stop; s++) {
+                        if(modbus_p) modbus_p->Poll(err);   // answer requests while idle
                         std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
             }
         }
         std::printf("\nContinuous mode finished: %d run(s)%s\n", runs_done,

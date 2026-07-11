@@ -14,27 +14,37 @@ CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
 CORE = integrator64.cpp method64.cpp
 ACQ  = $(CORE) hw64.cpp acquire64.cpp ads1115.cpp mcp4725.cpp gpio64.cpp runstore64.cpp
-HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h mcp4725.h gpio64.h acquire64.h runstore64.h gainrange.h
+# Modbus TCP is only linked into wpeak64_acq (not the GUI, which has no need
+# for it yet) since it needs -lws2_32 on the Windows build.
+MODBUS = modbus64.cpp
+HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h mcp4725.h gpio64.h acquire64.h runstore64.h gainrange.h modbus64.h
 
 all: test win64
 
-test: build/wpeak64_cli build/wpeak64_acq build/gainrange_test
+test: build/wpeak64_cli build/wpeak64_acq build/gainrange_test build/modbus64_test
 	./build/wpeak64_cli
 	./build/gainrange_test
+	./build/modbus64_test
 
 # pure ADS1115 auto-ranging logic, no I2C/hardware needed (see gainrange.h)
 build/gainrange_test: gainrange_test.cpp gainrange.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) gainrange_test.cpp -o $@
 
+# Modbus TCP wire-protocol test: a client thread and Poll() in the same
+# process, no wpeak64_acq/hardware timing involved (see modbus64_test.cpp)
+build/modbus64_test: modbus64_test.cpp modbus64.cpp $(CORE) $(HDRS)
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) modbus64_test.cpp modbus64.cpp $(CORE) -o $@ -lpthread
+
 build/wpeak64_cli: wpeak64_cli.cpp $(CORE) $(HDRS)
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) wpeak64_cli.cpp $(CORE) -o $@
 
 # acquisition/control tool: ADS1115 + GPIO on Linux, simulation everywhere
-build/wpeak64_acq: wpeak64_acq.cpp $(ACQ) $(HDRS)
+build/wpeak64_acq: wpeak64_acq.cpp $(ACQ) $(MODBUS) $(HDRS)
 	@mkdir -p build
-	$(CXX) $(CXXFLAGS) wpeak64_acq.cpp $(ACQ) -o $@ -lpthread
+	$(CXX) $(CXXFLAGS) wpeak64_acq.cpp $(ACQ) $(MODBUS) -o $@ -lpthread
 
 win64: build/wpeak64_cli.exe build/wpeak64.exe build/wpeak64_acq.exe
 
@@ -42,9 +52,9 @@ build/wpeak64_cli.exe: wpeak64_cli.cpp $(CORE) $(HDRS)
 	@mkdir -p build
 	$(WINCXX) $(CXXFLAGS) -static wpeak64_cli.cpp $(CORE) -o $@
 
-build/wpeak64_acq.exe: wpeak64_acq.cpp $(ACQ) $(HDRS)
+build/wpeak64_acq.exe: wpeak64_acq.cpp $(ACQ) $(MODBUS) $(HDRS)
 	@mkdir -p build
-	$(WINCXX) $(CXXFLAGS) -static wpeak64_acq.cpp $(ACQ) -o $@
+	$(WINCXX) $(CXXFLAGS) -static wpeak64_acq.cpp $(ACQ) $(MODBUS) -o $@ -lws2_32
 
 # toolbar icons reused from the original Peak Works software (icons/*.bmp),
 # embedded as Windows resources -- see wpeak64.rc
