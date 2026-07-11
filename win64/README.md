@@ -42,7 +42,14 @@ hardware, abstracted in `hw64.h`:
 
 - **ADS1115** 16-bit I2C ADC (`ads1115.cpp`) for the detector signal and
   temperature sensors — Linux `i2c-dev`, register-level single-shot reads,
-  configurable PGA full-scale range and data rate.
+  configurable PGA full-scale range and data rate, with **dynamic gain
+  ranging** per channel (`gainrange.h`): a saturated reading re-reads at a
+  coarser range before it's ever returned, a weak one steps to a finer
+  range for the next sample, and every count is normalized back to the
+  method's configured reference range — the ADS1115 equivalent of the
+  legacy `pow10_array`/`cur_autoscale` autorange normalization, so a
+  mid-run range change is invisible to the integrator. `wpeak64_acq
+  monitor` shows the active range (`[4096mV]` etc.) alongside each reading.
 - **GPIO lines** (`gpio64.cpp`, Linux gpiochip character device) for the
   relays/valves/heaters/lamp/pump the legacy `Set_valve()` bits drove.
 - **Simulation backend** (`backend=sim`, works on Windows and Linux):

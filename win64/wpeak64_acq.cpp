@@ -54,6 +54,8 @@ static int Monitor(const Method &m, Hardware &h, int seconds)
         long det = h.adc->ReadCounts(m.hw.adc_channel);
         std::printf("t=%3ds  det[ch%d]=%6ld (%.4f V)", s, m.hw.adc_channel,
                     det, h.adc->CountsToVolts(det));
+        int range = h.adc->CurrentRangeMv(m.hw.adc_channel);
+        if(range) std::printf(" [%dmV]", range);   // active PGA range, ads1115 only
         for(const TempZone &z : m.zones) {
             long c = h.adc->ReadCounts(z.adc_channel);
             double t = z.scale * h.adc->CountsToVolts(c) + z.offset;

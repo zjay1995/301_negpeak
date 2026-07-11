@@ -34,6 +34,10 @@ public:
     virtual long ReadCounts(int channel) = 0;
     // Volts for the same reading, using the configured full-scale range.
     virtual double CountsToVolts(long counts) const = 0;
+    // Active PGA full-scale range in mV for this channel (post auto-ranging,
+    // see gainrange.h), for diagnostics/monitor display. 0 = not applicable
+    // (e.g. the simulation backend, which doesn't need gain ranging).
+    virtual int CurrentRangeMv(int) const { return 0; }
 };
 
 class DigitalOut {

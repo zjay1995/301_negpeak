@@ -44,6 +44,8 @@ enum {
     IDC_EL_RESPONSE = 755, IDC_EL_AHIGH = 756, IDC_EL_ALOW = 757, IDC_EL_ACTIVE = 758,
     IDC_EL_ADD = 759, IDC_EL_UPDATE = 760, IDC_EL_DELETE = 761,
     IDC_EL_APPLY = 762, IDC_EL_CANCEL = 763,
+    // toolbar icons reused from the original Peak Works software (wpeak64.rc)
+    IDB_OPEN = 901, IDB_SAVE = 902, IDB_HELP = 903,
 };
 static const UINT WM_ACQ_DONE = WM_APP + 1;
 
@@ -63,6 +65,10 @@ static bool g_autorun = false;   // /autorun: start a run at launch
 // Segoe UI for labels/headers (falls back to Tahoma/Arial where missing),
 // Consolas for tabular numeric data; charcoal header strip per window.
 static HFONT g_font_ui = nullptr, g_font_ui_bold = nullptr, g_font_mono = nullptr;
+// toolbar icons reused from the original Peak Works software (wpeak64.rc);
+// null if the resource failed to load, in which case DrawToolIcon falls
+// back to its GDI-drawn equivalent.
+static HBITMAP g_bmp_open = nullptr, g_bmp_save = nullptr, g_bmp_help = nullptr;
 static const COLORREF kHeaderBg   = RGB(38, 42, 48);    // charcoal
 static const COLORREF kHeaderFg   = RGB(235, 238, 240);
 static const COLORREF kAccent     = RGB(0, 120, 155);   // industrial teal
@@ -83,6 +89,30 @@ static void CreateFonts()
     g_font_mono = CreateFontA(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                             CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+}
+
+static void LoadToolbarBitmaps(HINSTANCE inst)
+{
+    g_bmp_open = LoadBitmapA(inst, MAKEINTRESOURCEA(IDB_OPEN));
+    g_bmp_save = LoadBitmapA(inst, MAKEINTRESOURCEA(IDB_SAVE));
+    g_bmp_help = LoadBitmapA(inst, MAKEINTRESOURCEA(IDB_HELP));
+}
+
+// blits a small legacy bitmap centered in a toolbar button rect
+static void DrawBmpIcon(HDC dc, HBITMAP bmp, const RECT &r)
+{
+    BITMAP bm;
+    GetObjectA(bmp, sizeof bm, &bm);
+    HDC mem = CreateCompatibleDC(dc);
+    HGDIOBJ old = SelectObject(mem, bmp);
+    int w = r.right - r.left - 4, h = r.bottom - r.top - 4;
+    if(w > bm.bmWidth)  w = bm.bmWidth;    // never upscale these -- keep the retro look crisp
+    if(h > bm.bmHeight) h = bm.bmHeight;
+    int x = r.left + ((r.right - r.left) - w) / 2;
+    int y = r.top  + ((r.bottom - r.top)  - h) / 2;
+    BitBlt(dc, x, y, w, h, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, old);
+    DeleteDC(mem);
 }
 
 // bottom status bar: charcoal strip with teal-separated info segments;
@@ -177,7 +207,8 @@ static void DrawToolIcon(HDC dc, int id, const RECT &r, bool enabled)
     HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
 
     switch(id) {
-        case IDM_OPEN_DATA: {                        // folder
+        case IDM_OPEN_DATA: {                        // folder (legacy icon, GDI fallback)
+            if(g_bmp_open) { DrawBmpIcon(dc, g_bmp_open, r); break; }
             POINT p[] = { {r.left+7,r.top+12}, {r.left+13,r.top+12}, {r.left+15,r.top+15},
                           {r.right-7,r.top+15}, {r.right-7,r.bottom-9}, {r.left+7,r.bottom-9} };
             Polygon(dc, p, 6);
@@ -190,7 +221,8 @@ static void DrawToolIcon(HDC dc, int id, const RECT &r, bool enabled)
             MoveToEx(dc, r.left+12, cy+4, nullptr); LineTo(dc, r.right-12, cy+4);
             break;
         }
-        case IDM_SAVE_METHOD: {                      // floppy disk
+        case IDM_SAVE_METHOD: {                      // floppy disk (legacy icon, GDI fallback)
+            if(g_bmp_save) { DrawBmpIcon(dc, g_bmp_save, r); break; }
             Rectangle(dc, r.left+8, r.top+8, r.right-8, r.bottom-8);
             Rectangle(dc, r.left+13, r.top+8, r.right-13, r.top+15);
             Rectangle(dc, r.left+12, cy+2, r.right-12, r.bottom-8);
@@ -272,7 +304,8 @@ static void DrawToolIcon(HDC dc, int id, const RECT &r, bool enabled)
             }
             break;
         }
-        case IDM_ABOUT: {
+        case IDM_ABOUT: {                            // question mark (legacy icon, GDI fallback)
+            if(g_bmp_help) { DrawBmpIcon(dc, g_bmp_help, r); break; }
             SetTextColor(dc, cMain);
             TextOutA(dc, cx-4, cy-9, "?", 1);
             break;
@@ -300,12 +333,17 @@ static int DrawToolbar(HDC dc, const RECT &rc, bool running)
     HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
     for(int i = 0; i < n; i++) {
         RECT r = ToolButtonRect(i);
-        // button face
-        HBRUSH face = CreateSolidBrush(RGB(55, 60, 66));
+        int id = kToolButtons[i].id;
+        // button face -- the reused legacy bitmaps (folder/disk/help) are
+        // opaque with a light Windows-3.x background, so give just those
+        // buttons a matching light face instead of the usual dark one
+        bool legacyBmp = (id == IDM_OPEN_DATA && g_bmp_open) ||
+                         (id == IDM_SAVE_METHOD && g_bmp_save) ||
+                         (id == IDM_ABOUT && g_bmp_help);
+        HBRUSH face = CreateSolidBrush(legacyBmp ? RGB(192, 192, 192) : RGB(55, 60, 66));
         RECT br = r;
         FillRect(dc, &br, face);
         DeleteObject(face);
-        int id = kToolButtons[i].id;
         bool enabled = true;
         if(id == IDM_RUN_START || id == IDM_RUN_CAL || id == IDM_MANUAL) enabled = !running;
         if(id == IDM_RUN_ABORT) enabled = running;
@@ -1582,6 +1620,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
 {
     InitializeCriticalSection(&g_acq.cs);
     CreateFonts();
+    LoadToolbarBitmaps(hInst);
     ParseCmdLine(lpCmdLine);
     std::string err;
     if(!RunAnalysis(nullptr, err)) {

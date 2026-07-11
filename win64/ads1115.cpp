@@ -3,6 +3,7 @@
 #ifdef __linux__
 
 #include "ads1115.h"
+#include "gainrange.h"
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -20,11 +21,6 @@ static const uint16_t OS_SINGLE  = 0x8000;  // start single conversion / idle
 static const uint16_t MODE_SINGLE = 0x0100;
 static const uint16_t COMP_DISABLE = 0x0003;
 
-struct PgaChoice { int mv; int bits; double fsr_v; };
-static const PgaChoice kPga[] = {
-    { 6144, 0, 6.144 }, { 4096, 1, 4.096 }, { 2048, 2, 2.048 },
-    { 1024, 3, 1.024 }, {  512, 4, 0.512 }, {  256, 5, 0.256 },
-};
 struct DrChoice { int sps; int bits; };
 static const DrChoice kDr[] = {
     { 8, 0 }, { 16, 1 }, { 32, 2 }, { 64, 3 },
@@ -49,9 +45,8 @@ static bool ReadReg(int fd, int reg, uint16_t &val)
 
 Ads1115 *Ads1115::Open(const HardwareConfig &hw, std::string &err)
 {
-    int pga_bits = -1; double fsr_v = 0;
-    for(const auto &p : kPga)
-        if(p.mv == hw.pga_mv) { pga_bits = p.bits; fsr_v = p.fsr_v; }
+    double fsr_v = 0;
+    int pga_bits = PgaBitsForMv(hw.pga_mv, &fsr_v);
     if(pga_bits < 0) { err = "ads1115: invalid pga_mv (256|512|1024|2048|4096|6144)"; return nullptr; }
 
     int dr_bits = -1;
@@ -77,8 +72,8 @@ Ads1115 *Ads1115::Open(const HardwareConfig &hw, std::string &err)
     return new Ads1115(fd, pga_bits, fsr_v, dr_bits);
 }
 
-Ads1115::Ads1115(int fd, int pga_bits, double fsr_v, int dr_bits)
-    : fd_(fd), pga_bits_(pga_bits), fsr_v_(fsr_v), dr_bits_(dr_bits)
+Ads1115::Ads1115(int fd, int ref_pga_bits, double ref_fsr_v, int dr_bits)
+    : fd_(fd), ref_pga_bits_(ref_pga_bits), ref_fsr_v_(ref_fsr_v), dr_bits_(dr_bits)
 {
 }
 
@@ -87,13 +82,14 @@ Ads1115::~Ads1115()
     if(fd_ >= 0) close(fd_);
 }
 
-long Ads1115::ReadCounts(int channel)
+// one physical conversion at the given PGA setting (config register field);
+// the auto-ranging state machine in ReadCounts is the only caller.
+long Ads1115::ReadRaw(int channel, int pga_bits)
 {
-    if(channel < 0 || channel > 3) return 0;
     // MUX 100..111 = single-ended AIN0..AIN3 vs GND
     uint16_t mux = (uint16_t)(0x4 + channel) << 12;
     uint16_t cfg = OS_SINGLE | mux |
-                   (uint16_t)(pga_bits_ << 9) | MODE_SINGLE |
+                   (uint16_t)(pga_bits << 9) | MODE_SINGLE |
                    (uint16_t)(dr_bits_ << 5) | COMP_DISABLE;
     if(!WriteReg(fd_, REG_CONFIG, cfg)) return 0;
 
@@ -110,9 +106,33 @@ long Ads1115::ReadCounts(int channel)
     return (long)(int16_t)raw;
 }
 
+long Ads1115::ReadCounts(int channel)
+{
+    if(channel < 0 || channel > 3) return 0;
+    ChanState &cs = chan_[channel];
+    if(!cs.inited) { cs.bits = ref_pga_bits_; cs.inited = true; }
+
+    // AutoRangedRead re-reads once at a coarser range if the first read
+    // saturates (so the caller never sees a clipped sample), steps to a
+    // finer range for next time if the signal was weak, and always
+    // normalizes the returned count to the reference range (ref_fsr_v_) --
+    // see gainrange.h.
+    return AutoRangedRead(cs.bits, ref_fsr_v_,
+                          [&](int bits) { return ReadRaw(channel, bits); });
+}
+
 double Ads1115::CountsToVolts(long counts) const
 {
-    return (double)counts * fsr_v_ / 32768.0;
+    return (double)counts * ref_fsr_v_ / 32768.0;
+}
+
+int Ads1115::CurrentRangeMv(int channel) const
+{
+    if(channel < 0 || channel > 3 || !chan_[channel].inited) return 0;
+    int n; const PgaChoice *t = PgaTable(n);
+    for(int i = 0; i < n; i++)
+        if(t[i].bits == chan_[channel].bits) return t[i].mv;
+    return 0;
 }
 
 } // namespace wpeak64

@@ -1,0 +1,9 @@
+// wpeak64.rc -- toolbar icons reused from the original GC301c Peak Works
+// software (repo root *.BMP files, WPEAK.RC). Loaded at runtime via
+// LoadBitmapA(hInst, MAKEINTRESOURCE(IDB_*)) and blitted into the
+// corresponding toolbar buttons in DrawToolIcon(); GDI-drawn icons remain
+// as a fallback if a bitmap fails to load.
+
+901 BITMAP "icons/open_data.bmp"   // RUN.BMP  -- folder icon, used for Open Data
+902 BITMAP "icons/save.bmp"        // SAVE.BMP -- floppy disk, used for Save Method
+903 BITMAP "icons/help.bmp"        // HELP.BMP -- question mark, used for About

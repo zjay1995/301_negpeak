@@ -9,16 +9,23 @@
 
 CXX      ?= g++
 WINCXX   ?= x86_64-w64-mingw32-g++
+WINDRES  ?= x86_64-w64-mingw32-windres
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
 CORE = integrator64.cpp method64.cpp
 ACQ  = $(CORE) hw64.cpp acquire64.cpp ads1115.cpp gpio64.cpp runstore64.cpp
-HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h gpio64.h acquire64.h runstore64.h
+HDRS = peak64.h synth64.h method64.h hw64.h ads1115.h gpio64.h acquire64.h runstore64.h gainrange.h
 
 all: test win64
 
-test: build/wpeak64_cli build/wpeak64_acq
+test: build/wpeak64_cli build/wpeak64_acq build/gainrange_test
 	./build/wpeak64_cli
+	./build/gainrange_test
+
+# pure ADS1115 auto-ranging logic, no I2C/hardware needed (see gainrange.h)
+build/gainrange_test: gainrange_test.cpp gainrange.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) gainrange_test.cpp -o $@
 
 build/wpeak64_cli: wpeak64_cli.cpp $(CORE) $(HDRS)
 	@mkdir -p build
@@ -39,9 +46,16 @@ build/wpeak64_acq.exe: wpeak64_acq.cpp $(ACQ) $(HDRS)
 	@mkdir -p build
 	$(WINCXX) $(CXXFLAGS) -static wpeak64_acq.cpp $(ACQ) -o $@
 
-build/wpeak64.exe: wpeak64_gui.cpp $(ACQ) $(HDRS)
+# toolbar icons reused from the original Peak Works software (icons/*.bmp),
+# embedded as Windows resources -- see wpeak64.rc
+build/wpeak64_res.o: wpeak64.rc icons/open_data.bmp icons/save.bmp icons/help.bmp
 	@mkdir -p build
-	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(ACQ) -o $@ -lgdi32 -luser32 -lcomdlg32 -lcomctl32
+	$(WINDRES) wpeak64.rc -O coff -o $@
+
+build/wpeak64.exe: wpeak64_gui.cpp $(ACQ) $(HDRS) build/wpeak64_res.o
+	@mkdir -p build
+	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(ACQ) build/wpeak64_res.o \
+		-o $@ -lgdi32 -luser32 -lcomdlg32 -lcomctl32
 
 clean:
 	rm -rf build
