@@ -116,6 +116,190 @@ static std::string BaseName(const std::string &path)
     return p == std::string::npos ? path : path.substr(p + 1);
 }
 
+// ---- toolbar strip (second menu row with icon shortcuts) ----------------------
+// Drawn under the native menu bar in the main window, legacy toolbar style:
+// Open Data | Open Method | Save Method | Export || Run | Cal | Stop ||
+// Settings | Element Table | Acquisition | About. Icons are GDI-drawn.
+struct ToolButton { int id; bool sep_before; };
+static const ToolButton kToolButtons[] = {
+    { IDM_OPEN_DATA,   false }, { IDM_OPEN_METHOD, false },
+    { IDM_SAVE_METHOD, false }, { IDM_EXPORT,      false },
+    { IDM_RUN_START,   true  }, { IDM_RUN_CAL,     false }, { IDM_RUN_ABORT, false },
+    { IDM_SETTINGS,    true  }, { IDM_WIN_ELEM,    false },
+    { IDM_WIN_ACQ,     false }, { IDM_ABOUT,       false },
+};
+static const int kToolH = 46, kToolBtn = 34, kToolPad = 6, kToolSep = 12;
+
+static RECT ToolButtonRect(int index)
+{
+    int x = 12;
+    for(int i = 0; i < index; i++) {
+        if(kToolButtons[i + 1].sep_before) x += kToolSep;   // group gap
+        x += kToolBtn + kToolPad;
+    }
+    RECT r = { x, kToolPad, x + kToolBtn, kToolPad + kToolBtn };
+    return r;
+}
+
+static int ToolbarButtonAt(int x, int y)
+{
+    const int n = (int)(sizeof kToolButtons / sizeof kToolButtons[0]);
+    if(y < 0 || y > kToolH) return 0;
+    for(int i = 0; i < n; i++) {
+        RECT r = ToolButtonRect(i);
+        if(x >= r.left && x < r.right && y >= r.top && y < r.bottom)
+            return kToolButtons[i].id;
+    }
+    return 0;
+}
+
+static void DrawToolIcon(HDC dc, int id, const RECT &r, bool enabled)
+{
+    COLORREF cMain = enabled ? RGB(210, 215, 220) : RGB(105, 110, 116);
+    COLORREF cRun  = enabled ? RGB(60, 190, 90)   : RGB(70, 95, 78);
+    COLORREF cStop = enabled ? RGB(225, 70, 60)   : RGB(105, 72, 70);
+    COLORREF cTeal = enabled ? RGB(60, 180, 215)  : RGB(70, 105, 118);
+    int cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+
+    HPEN pen = CreatePen(PS_SOLID, 2, cMain);
+    HGDIOBJ oldPen = SelectObject(dc, pen);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+
+    switch(id) {
+        case IDM_OPEN_DATA: {                        // folder
+            POINT p[] = { {r.left+7,r.top+12}, {r.left+13,r.top+12}, {r.left+15,r.top+15},
+                          {r.right-7,r.top+15}, {r.right-7,r.bottom-9}, {r.left+7,r.bottom-9} };
+            Polygon(dc, p, 6);
+            break;
+        }
+        case IDM_OPEN_METHOD: {                      // document with lines
+            Rectangle(dc, r.left+9, r.top+7, r.right-9, r.bottom-7);
+            MoveToEx(dc, r.left+12, cy-4, nullptr); LineTo(dc, r.right-12, cy-4);
+            MoveToEx(dc, r.left+12, cy,   nullptr); LineTo(dc, r.right-12, cy);
+            MoveToEx(dc, r.left+12, cy+4, nullptr); LineTo(dc, r.right-12, cy+4);
+            break;
+        }
+        case IDM_SAVE_METHOD: {                      // floppy disk
+            Rectangle(dc, r.left+8, r.top+8, r.right-8, r.bottom-8);
+            Rectangle(dc, r.left+13, r.top+8, r.right-13, r.top+15);
+            Rectangle(dc, r.left+12, cy+2, r.right-12, r.bottom-8);
+            break;
+        }
+        case IDM_EXPORT: {                           // arrow out of tray
+            MoveToEx(dc, r.left+8, r.bottom-11, nullptr); LineTo(dc, r.left+8, r.bottom-8);
+            LineTo(dc, r.right-8, r.bottom-8); LineTo(dc, r.right-8, r.bottom-11);
+            MoveToEx(dc, cx, r.bottom-12, nullptr); LineTo(dc, cx, r.top+8);
+            MoveToEx(dc, cx-5, r.top+13, nullptr); LineTo(dc, cx, r.top+8);
+            LineTo(dc, cx+5, r.top+13);
+            break;
+        }
+        case IDM_RUN_START: {                        // green play triangle
+            HBRUSH b = CreateSolidBrush(cRun);
+            HPEN p2 = CreatePen(PS_SOLID, 1, cRun);
+            SelectObject(dc, b); SelectObject(dc, p2);
+            POINT p[] = { {r.left+11,r.top+8}, {r.left+11,r.bottom-8}, {r.right-9,cy} };
+            Polygon(dc, p, 3);
+            SelectObject(dc, pen); SelectObject(dc, GetStockObject(NULL_BRUSH));
+            DeleteObject(b); DeleteObject(p2);
+            break;
+        }
+        case IDM_RUN_CAL: {                          // teal triangle + C
+            HBRUSH b = CreateSolidBrush(cTeal);
+            HPEN p2 = CreatePen(PS_SOLID, 1, cTeal);
+            SelectObject(dc, b); SelectObject(dc, p2);
+            POINT p[] = { {r.left+9,r.top+8}, {r.left+9,r.bottom-8}, {r.right-13,cy} };
+            Polygon(dc, p, 3);
+            SelectObject(dc, pen); SelectObject(dc, GetStockObject(NULL_BRUSH));
+            DeleteObject(b); DeleteObject(p2);
+            SetTextColor(dc, cMain);
+            TextOutA(dc, r.right-12, cy-8, "C", 1);
+            break;
+        }
+        case IDM_RUN_ABORT: {                        // red stop square
+            HBRUSH b = CreateSolidBrush(cStop);
+            HPEN p2 = CreatePen(PS_SOLID, 1, cStop);
+            SelectObject(dc, b); SelectObject(dc, p2);
+            Rectangle(dc, r.left+10, r.top+10, r.right-10, r.bottom-10);
+            SelectObject(dc, pen); SelectObject(dc, GetStockObject(NULL_BRUSH));
+            DeleteObject(b); DeleteObject(p2);
+            break;
+        }
+        case IDM_SETTINGS: {                         // gear: circle + spokes
+            Ellipse(dc, cx-7, cy-7, cx+7, cy+7);
+            for(int a = 0; a < 8; a++) {
+                static const int dx[] = { 0, 7, 10, 7, 0, -7, -10, -7 };
+                static const int dy[] = { -10, -7, 0, 7, 10, 7, 0, -7 };
+                MoveToEx(dc, cx + dx[a] * 7 / 10, cy + dy[a] * 7 / 10, nullptr);
+                LineTo(dc, cx + dx[a], cy + dy[a]);
+            }
+            break;
+        }
+        case IDM_WIN_ELEM: {                         // table grid
+            Rectangle(dc, r.left+8, r.top+9, r.right-8, r.bottom-9);
+            MoveToEx(dc, r.left+8, cy, nullptr);  LineTo(dc, r.right-8, cy);
+            MoveToEx(dc, cx-3, r.top+9, nullptr); LineTo(dc, cx-3, r.bottom-9);
+            break;
+        }
+        case IDM_WIN_ACQ: {                          // mini chromatogram
+            POINT p[] = { {r.left+7,cy+6}, {r.left+11,cy+6}, {r.left+14,cy-8},
+                          {r.left+17,cy+6}, {r.left+20,cy+9}, {r.left+23,cy+2},
+                          {r.right-7,cy+2} };
+            Polyline(dc, p, 7);
+            break;
+        }
+        case IDM_ABOUT: {
+            SetTextColor(dc, cMain);
+            TextOutA(dc, cx-4, cy-9, "?", 1);
+            break;
+        }
+    }
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(pen);
+}
+
+// second menu row: charcoal strip of icon buttons + right-aligned title;
+// returns the content top
+static int DrawToolbar(HDC dc, const RECT &rc, bool running)
+{
+    RECT strip = rc; strip.bottom = strip.top + kToolH;
+    HBRUSH bg = CreateSolidBrush(kHeaderBg);
+    FillRect(dc, &strip, bg);
+    DeleteObject(bg);
+    RECT accent = strip; accent.top = strip.bottom; accent.bottom = strip.bottom + 3;
+    HBRUSH ab = CreateSolidBrush(kAccent);
+    FillRect(dc, &accent, ab);
+    DeleteObject(ab);
+
+    const int n = (int)(sizeof kToolButtons / sizeof kToolButtons[0]);
+    HGDIOBJ oldFont = SelectObject(dc, g_font_ui);
+    for(int i = 0; i < n; i++) {
+        RECT r = ToolButtonRect(i);
+        // button face
+        HBRUSH face = CreateSolidBrush(RGB(55, 60, 66));
+        RECT br = r;
+        FillRect(dc, &br, face);
+        DeleteObject(face);
+        int id = kToolButtons[i].id;
+        bool enabled = true;
+        if(id == IDM_RUN_START || id == IDM_RUN_CAL) enabled = !running;
+        if(id == IDM_RUN_ABORT) enabled = running;
+        SetBkMode(dc, TRANSPARENT);
+        DrawToolIcon(dc, id, r, enabled);
+    }
+    // right-aligned title
+    SelectObject(dc, g_font_ui_bold);
+    SetTextColor(dc, kHeaderFg);
+    const char *title = "GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64";
+    SIZE sz;
+    GetTextExtentPoint32A(dc, title, (int)strlen(title), &sz);
+    if(ToolButtonRect(n - 1).right + 24 + sz.cx < rc.right)
+        TextOutA(dc, rc.right - sz.cx - 16, strip.top + 12, title, (int)strlen(title));
+    SelectObject(dc, oldFont);
+    SetTextColor(dc, RGB(0,0,0));
+    return strip.bottom + 3;
+}
+
 // charcoal strip with a white title and teal accent line; returns content top
 static int DrawHeaderStrip(HDC dc, const RECT &rc, const char *title)
 {
@@ -389,7 +573,6 @@ static void PaintMain(HDC dc, const RECT &rc)
 {
     FillRect(dc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
     SetBkMode(dc, TRANSPARENT);
-    int top = DrawHeaderStrip(dc, rc, "GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64");
 
     // totals for the % columns (legacy: share of the summed magnitudes)
     int nneg = 0, alarm = ALARM_NONE;
@@ -410,6 +593,10 @@ static void PaintMain(HDC dc, const RECT &rc)
     auto zones = g_acq.zones;
     std::vector<long> live = running ? g_acq.live : std::vector<long>();
     LeaveCriticalSection(&g_acq.cs);
+
+    // second menu row: icon toolbar (Run/Cal/Stop and file/window shortcuts)
+    int top = DrawToolbar(dc, rc, running);
+
     char seg[96];
     std::vector<std::string> segs;
     for(auto &z : zones) {
@@ -1042,6 +1229,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if(g_elemwnd) InvalidateRect(g_elemwnd, nullptr, FALSE);
             return 0;
         }
+        case WM_LBUTTONDOWN: {   // toolbar icon clicks
+            int id = ToolbarButtonAt((int)(short)LOWORD(lp), (int)(short)HIWORD(lp));
+            if(id) PostMessageA(hwnd, WM_COMMAND, (WPARAM)id, 0);
+            return 0;
+        }
         case WM_TIMER:   // repaint the live trace while a run is in progress
             EnterCriticalSection(&g_acq.cs);
             {
@@ -1138,9 +1330,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)opts, "&Options");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)view, "&Window");
     AppendMenuA(menubar, MF_POPUP, (UINT_PTR)help, "&Help");
-    // one-click shortcuts directly on the menu bar (legacy toolbar style)
-    AppendMenuA(menubar, MF_STRING, IDM_RUN_START, "&Run");
-    AppendMenuA(menubar, MF_STRING, IDM_RUN_ABORT, "S&top");
+    // (Run/Stop shortcuts live as icons on the toolbar row below the menu)
 
     g_main = CreateWindowA("WPEAK64",
                            "GC301c - WPEAK64 (64-bit Windows port)",
