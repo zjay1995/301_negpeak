@@ -31,7 +31,13 @@ Negative peaks are detected and displayed but excluded from quantitation
   `known_peaks=1` drops unidentified peaks from the report.
 - **Concentrations**: `response × height` or `response × area` per
   `detect_meth`; peaks without a response factor report `n/cal`.
-- **Report export**: CSV via `-o` (CLI) or File → Export Report (GUI).
+- **Report export**: CSV via `-o` (CLI) or File → Export Report (GUI);
+  a self-contained, printable HTML report (peak table + inline SVG
+  chromatogram with peak markers) via `-H` (CLI) or File → Print Report
+  (GUI, opens it in the default browser — Ctrl+P from there reaches any
+  printer or "Save as PDF"; the modern equivalent of the legacy
+  `CM_PRINTREPORT` dialog). `wpeak64_acq` writes it automatically as
+  `report.html`/`report_b.html` alongside every persisted run (`-j jobdir`).
 - `sample_run.csv` + `sample_method.ini` form a working example
   (3 identified positive peaks + 1 negative peak).
 

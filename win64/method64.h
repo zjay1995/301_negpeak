@@ -173,6 +173,15 @@ int EvaluateAlarms(std::vector<ReportRow> &rows, const Method &m);
 bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
                     const Method &m, long noise, long baseline, std::string &err);
 
+// Write a self-contained, printable HTML report (peak table + an inline SVG
+// chromatogram with peak markers/labels) -- the modern equivalent of the
+// legacy CM_PRINTREPORT dialog: open the file in a browser and print or
+// "Save as PDF" from there, rather than driving a printer DC directly.
+// trace may be empty (table-only report, no chromatogram section).
+bool WriteReportHtml(const std::string &path, const std::vector<long> &trace,
+                     const std::vector<ReportRow> &rows, const Method &m,
+                     long noise, long baseline, std::string &err);
+
 } // namespace wpeak64
 
 #endif // METHOD64_H

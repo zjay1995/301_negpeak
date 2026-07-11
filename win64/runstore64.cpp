@@ -105,6 +105,9 @@ bool SaveRun(const std::string &jobdir, const Method &m,
     if(!WriteReportCsv(rundir + "/report.csv", res.rows, m,
                        res.noise, res.baseline, err))
         return false;
+    if(!WriteReportHtml(rundir + "/report.html", res.trace, res.rows, m,
+                        res.noise, res.baseline, err))
+        return false;
 
     if(res.has_b) {
         Method mb = m.AsDetectorB();
@@ -117,6 +120,9 @@ bool SaveRun(const std::string &jobdir, const Method &m,
         }
         if(!WriteReportCsv(rundir + "/report_b.csv", res.rows_b, mb,
                            res.noise_b, res.baseline_b, err))
+            return false;
+        if(!WriteReportHtml(rundir + "/report_b.html", res.trace_b, res.rows_b, mb,
+                            res.noise_b, res.baseline_b, err))
             return false;
     }
 

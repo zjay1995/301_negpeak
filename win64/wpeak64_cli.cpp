@@ -2,11 +2,12 @@
 //
 // Usage:
 //   wpeak64_cli                              synthetic demo run + self-test
-//   wpeak64_cli -d run.csv [-m method.ini] [-o report.csv]
+//   wpeak64_cli -d run.csv [-m method.ini] [-o report.csv] [-H report.html]
 //
 //   -d  chromatogram CSV ("value" or "time,value" per line)
 //   -m  method file: detector settings + component table (see method64.h)
 //   -o  write the peak report to a CSV file
+//   -H  write a printable HTML report (table + SVG chromatogram)
 //
 // Peaks are identified against the method's component table (CheckRT retention
 // -time windows), concentrations computed from response factors, and negative
@@ -23,7 +24,7 @@ using namespace wpeak64;
 
 int main(int argc, char **argv)
 {
-    std::string data_path, method_path, report_path;
+    std::string data_path, method_path, report_path, html_path;
     for(int i = 1; i < argc; i++) {
         auto need = [&](const char *opt) -> const char * {
             if(i + 1 >= argc) { std::fprintf(stderr, "missing argument for %s\n", opt); std::exit(2); }
@@ -32,9 +33,10 @@ int main(int argc, char **argv)
         if     (!std::strcmp(argv[i], "-d")) data_path   = need("-d");
         else if(!std::strcmp(argv[i], "-m")) method_path = need("-m");
         else if(!std::strcmp(argv[i], "-o")) report_path = need("-o");
+        else if(!std::strcmp(argv[i], "-H")) html_path   = need("-H");
         else {
             std::fprintf(stderr,
-                "usage: %s [-d run.csv] [-m method.ini] [-o report.csv]\n", argv[0]);
+                "usage: %s [-d run.csv] [-m method.ini] [-o report.csv] [-H report.html]\n", argv[0]);
             return 2;
         }
     }
@@ -106,6 +108,13 @@ int main(int argc, char **argv)
             return 2;
         }
         std::printf("Report written to %s\n", report_path.c_str());
+    }
+    if(!html_path.empty()) {
+        if(!WriteReportHtml(html_path, y, rows, m, integ.noise, integ.act_thresh, err)) {
+            std::fprintf(stderr, "error: %s\n", err.c_str());
+            return 2;
+        }
+        std::printf("HTML report written to %s\n", html_path.c_str());
     }
 
     // with no arguments the exit code doubles as the synthetic self-test:

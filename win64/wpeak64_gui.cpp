@@ -24,6 +24,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <commctrl.h>
+#include <shellapi.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -36,6 +37,7 @@ using namespace wpeak64;
 enum {
     IDM_OPEN_DATA = 101, IDM_OPEN_METHOD = 102, IDM_EXPORT = 103,
     IDM_EXIT = 104, IDM_OPEN_CAL = 105, IDM_SAVE_METHOD = 106,
+    IDM_PRINT_REPORT = 107,
     IDM_RUN_START = 201, IDM_RUN_CAL = 202, IDM_RUN_ABORT = 203,
     IDM_ABOUT = 401, IDM_SETTINGS = 501, IDM_MANUAL = 502, IDM_ELEMENTS = 503,
     IDC_SET_OK = 601, IDC_SET_CANCEL = 602,
@@ -1676,6 +1678,29 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     }
                     return 0;
                 }
+                case IDM_PRINT_REPORT: {
+                    // "Print" the modern way: render a self-contained,
+                    // printable HTML report (table + SVG chromatogram) and
+                    // open it in the default browser -- Ctrl+P from there
+                    // reaches any installed printer or "Save as PDF",
+                    // without WPEAK64 driving a printer DC directly.
+                    char tmp[MAX_PATH];
+                    GetTempPathA(sizeof tmp, tmp);
+                    std::string p = std::string(tmp) + "wpeak64_report.html";
+                    std::string err;
+                    if(!WriteReportHtml(p, g_trace, g_rows, g_method, g_noise, g_baseline, err)) {
+                        MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
+                        return 0;
+                    }
+                    if(g_has_b) {
+                        std::string pb = std::string(tmp) + "wpeak64_report_b.html";
+                        std::string berr;
+                        WriteReportHtml(pb, g_trace_b, g_rows_b, g_method.AsDetectorB(),
+                                        g_noise_b, g_baseline_b, berr);
+                    }
+                    ShellExecuteA(hwnd, "open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    return 0;
+                }
                 case IDM_RUN_START:
                     // live trace draws in the main window's graph pane
                     if(StartAcquisition(hwnd, false, 0))
@@ -1809,6 +1834,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     AppendMenuA(file, MF_SEPARATOR, 0, nullptr);
     AppendMenuA(file, MF_STRING, IDM_SAVE_METHOD, "&Save Method (INI)...");
     AppendMenuA(file, MF_STRING, IDM_EXPORT,      "&Export Report (CSV)...");
+    AppendMenuA(file, MF_STRING, IDM_PRINT_REPORT,"&Print Report...");
     AppendMenuA(file, MF_SEPARATOR, 0, nullptr);
     AppendMenuA(file, MF_STRING, IDM_EXIT,        "E&xit");
     HMENU run = CreatePopupMenu();

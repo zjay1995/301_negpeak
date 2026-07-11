@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <ctime>
 
 namespace wpeak64 {
 
@@ -568,6 +569,151 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
                       alarm);
         f << buf;
     }
+    return (bool)f;
+}
+
+static std::string HtmlEscape(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for(char c : s) {
+        switch(c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;";  break;
+            case '>': out += "&gt;";  break;
+            case '"': out += "&quot;"; break;
+            default:  out += c;
+        }
+    }
+    return out;
+}
+
+bool WriteReportHtml(const std::string &path, const std::vector<long> &trace,
+                     const std::vector<ReportRow> &rows, const Method &m,
+                     long noise, long baseline, std::string &err)
+{
+    std::ofstream f(path);
+    if(!f) { err = "cannot write report file: " + path; return false; }
+
+    char tbuf[64];
+    std::time_t t = std::time(nullptr);
+    std::strftime(tbuf, sizeof tbuf, "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+
+    f << "<!doctype html>\n<html><head><meta charset=\"utf-8\">\n"
+         "<title>GC301c WPEAK64 Peak Report</title>\n"
+         "<style>\n"
+         "body{font-family:'Segoe UI',Arial,sans-serif;color:#222;margin:24px;}\n"
+         "h1{font-size:18px;margin:0 0 4px 0;}\n"
+         ".meta{color:#666;font-size:12px;margin-bottom:16px;}\n"
+         "table{border-collapse:collapse;width:100%;font-size:13px;margin-bottom:8px;}\n"
+         "th,td{border:1px solid #ccc;padding:4px 8px;text-align:right;}\n"
+         "th{background:#26292f;color:#eee;text-align:center;}\n"
+         "td:first-child,td:nth-child(2){text-align:left;}\n"
+         "tr.neg{color:#c05a00;} tr.alarm{color:#c62828;font-weight:bold;}\n"
+         "svg{border:1px solid #ccc;margin-top:16px;background:#fff;max-width:100%;}\n"
+         ".axis{stroke:#999;stroke-width:1;} .grid{stroke:#eee;stroke-width:1;}\n"
+         ".trace{stroke:#0577b1;stroke-width:1.3;fill:none;}\n"
+         ".base{stroke:#2e8b57;stroke-width:1;stroke-dasharray:4 3;}\n"
+         ".pk{stroke:#c62828;stroke-width:1.5;} .pkneg{stroke:#c05a00;stroke-width:1.5;}\n"
+         ".lbl{font:11px sans-serif;fill:#333;} .axlbl{font:10px sans-serif;fill:#666;}\n"
+         "@media print{body{margin:0;} svg{border:none;}}\n"
+         "</style></head><body>\n"
+      << "<h1>GC301c Gas Chromatograph &mdash; WPEAK64 Peak Report</h1>\n"
+      << "<div class=\"meta\">Generated " << tbuf
+      << " &middot; Noise=" << noise << " Baseline=" << baseline
+      << " &middot; " << (m.detect_meth == 0 ? "height" : "area") << " method</div>\n";
+
+    f << "<table><thead><tr><th>Num</th><th>Component</th><th>RT (s)</th>"
+         "<th>Height</th><th>Area</th><th>From (s)</th><th>To (s)</th>"
+         "<th>Concentration</th><th>Type</th><th>Alarm</th></tr></thead><tbody>\n";
+    char buf[256];
+    for(const ReportRow &r : rows) {
+        const Peak &p = r.peak;
+        bool neg = p.Height < 0;
+        std::string conc = "-";
+        if(r.calibrated) { std::snprintf(buf, sizeof buf, "%g", r.concentration); conc = buf; }
+        const char *alarm = r.alarm == ALARM_NONE ? "" :
+                            r.alarm == ALARM_HIGH ? "HIGH" :
+                            r.alarm == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
+        std::string cls = std::string(neg ? "neg " : "") + (r.alarm ? "alarm" : "");
+        f << "<tr class=\"" << cls << "\"><td>" << (neg ? "-" : std::to_string(p.Num))
+          << "</td><td>" << HtmlEscape(r.name) << "</td><td>";
+        std::snprintf(buf, sizeof buf, "%.1f", (double)p.Time / m.data_rate); f << buf;
+        f << "</td><td>" << p.Height << "</td><td>";
+        std::snprintf(buf, sizeof buf, "%.0f", p.Area); f << buf;
+        f << "</td><td>";
+        std::snprintf(buf, sizeof buf, "%.1f", (double)p.From / m.data_rate); f << buf;
+        f << "</td><td>";
+        std::snprintf(buf, sizeof buf, "%.1f", (double)p.To / m.data_rate); f << buf;
+        f << "</td><td>" << conc << "</td><td>" << (neg ? "negative" : "positive")
+          << "</td><td>" << alarm << "</td></tr>\n";
+    }
+    f << "</tbody></table>\n";
+
+    if(trace.size() >= 2) {
+        const int W = 900, H = 320, ML = 55, MR = 15, MT = 15, MB = 35;
+        long ymin = trace[0], ymax = trace[0];
+        for(long v : trace) { if(v < ymin) ymin = v; if(v > ymax) ymax = v; }
+        if(baseline) { if(baseline < ymin) ymin = baseline; if(baseline > ymax) ymax = baseline; }
+        long yspan = ymax - ymin; if(yspan < 1) yspan = 1;
+        ymin -= yspan / 10; ymax += yspan / 10; yspan = ymax - ymin;
+        const long n = (long)trace.size();
+        auto X = [&](double i) { return ML + (W - ML - MR) * i / (n - 1); };
+        auto Y = [&](double v) { return H - MB - (H - MT - MB) * (v - ymin) / yspan; };
+
+        f << "<svg viewBox=\"0 0 " << W << " " << H << "\" width=\"" << W << "\" height=\"" << H << "\">\n";
+        // gridlines + y ticks
+        for(int t2 = 0; t2 <= 5; t2++) {
+            double v = ymin + (double)yspan * t2 / 5;
+            double yy = Y(v);
+            std::snprintf(buf, sizeof buf,
+                "<line class=\"grid\" x1=\"%d\" y1=\"%.1f\" x2=\"%d\" y2=\"%.1f\"/>"
+                "<text class=\"axlbl\" x=\"%d\" y=\"%.1f\" text-anchor=\"end\">%ld</text>\n",
+                ML, yy, W - MR, yy, ML - 4, yy + 3, (long)v);
+            f << buf;
+        }
+        // x ticks
+        long total_s = n / (m.data_rate > 0 ? m.data_rate : 1);
+        long step = total_s > 0 ? (total_s + 5) / 6 : 1; if(step < 1) step = 1;
+        for(long s = 0; s <= total_s; s += step) {
+            double x = X((double)s * m.data_rate);
+            std::snprintf(buf, sizeof buf,
+                "<text class=\"axlbl\" x=\"%.1f\" y=\"%d\" text-anchor=\"middle\">%lds</text>\n",
+                x, H - MB + 14, s);
+            f << buf;
+        }
+        if(baseline) {
+            std::snprintf(buf, sizeof buf, "<line class=\"base\" x1=\"%d\" y1=\"%.1f\" x2=\"%d\" y2=\"%.1f\"/>\n",
+                          ML, Y((double)baseline), W - MR, Y((double)baseline));
+            f << buf;
+        }
+        // trace polyline
+        f << "<polyline class=\"trace\" points=\"";
+        for(long i = 0; i < n; i++) {
+            std::snprintf(buf, sizeof buf, "%.1f,%.1f ", X((double)i), Y((double)trace[(size_t)i]));
+            f << buf;
+        }
+        f << "\"/>\n";
+        // peak markers/labels
+        for(const ReportRow &r : rows) {
+            const Peak &p = r.peak;
+            bool neg = p.Height < 0;
+            double xm = X((double)p.Time), yb = Y((double)baseline);
+            double yap = Y((double)(baseline + p.Height));
+            std::snprintf(buf, sizeof buf,
+                "<line class=\"%s\" x1=\"%.1f\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\"/>\n",
+                neg ? "pkneg" : "pk", xm, yb, xm, yap);
+            f << buf;
+            std::string lbl = neg ? "NEG" : (r.component >= 0 ? r.name : std::to_string(p.Num));
+            std::snprintf(buf, sizeof buf,
+                "<text class=\"lbl\" x=\"%.1f\" y=\"%.1f\" text-anchor=\"middle\">%s</text>\n",
+                xm, yap - 4, HtmlEscape(lbl).c_str());
+            f << buf;
+        }
+        f << "</svg>\n";
+    }
+
+    f << "</body></html>\n";
     return (bool)f;
 }
 

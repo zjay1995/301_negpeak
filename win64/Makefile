@@ -65,7 +65,7 @@ build/wpeak64_res.o: wpeak64.rc icons/open_data.bmp icons/save.bmp icons/help.bm
 build/wpeak64.exe: wpeak64_gui.cpp $(ACQ) $(HDRS) build/wpeak64_res.o
 	@mkdir -p build
 	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(ACQ) build/wpeak64_res.o \
-		-o $@ -lgdi32 -luser32 -lcomdlg32 -lcomctl32
+		-o $@ -lgdi32 -luser32 -lcomdlg32 -lcomctl32 -lshell32
 
 clean:
 	rm -rf build
