@@ -23,6 +23,7 @@
 
 #include <windows.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -36,9 +37,13 @@ enum {
     IDM_OPEN_DATA = 101, IDM_OPEN_METHOD = 102, IDM_EXPORT = 103,
     IDM_EXIT = 104, IDM_OPEN_CAL = 105, IDM_SAVE_METHOD = 106,
     IDM_RUN_START = 201, IDM_RUN_CAL = 202, IDM_RUN_ABORT = 203,
-    IDM_ABOUT = 401, IDM_SETTINGS = 501, IDM_MANUAL = 502,
+    IDM_ABOUT = 401, IDM_SETTINGS = 501, IDM_MANUAL = 502, IDM_ELEMENTS = 503,
     IDC_SET_OK = 601, IDC_SET_CANCEL = 602,
     IDC_MANUAL_BASE = 700,   // + line index, up to ~64 controllable lines
+    IDC_EL_LIST = 751, IDC_EL_NAME = 752, IDC_EL_RT = 753, IDC_EL_WINDOW = 754,
+    IDC_EL_RESPONSE = 755, IDC_EL_AHIGH = 756, IDC_EL_ALOW = 757, IDC_EL_ACTIVE = 758,
+    IDC_EL_ADD = 759, IDC_EL_UPDATE = 760, IDC_EL_DELETE = 761,
+    IDC_EL_APPLY = 762, IDC_EL_CANCEL = 763,
 };
 static const UINT WM_ACQ_DONE = WM_APP + 1;
 
@@ -131,7 +136,7 @@ static const ToolButton kToolButtons[] = {
     { IDM_OPEN_DATA,   false }, { IDM_OPEN_METHOD, false },
     { IDM_SAVE_METHOD, false }, { IDM_EXPORT,      false },
     { IDM_RUN_START,   true  }, { IDM_RUN_CAL,     false }, { IDM_RUN_ABORT, false },
-    { IDM_SETTINGS,    true  }, { IDM_MANUAL,      false },
+    { IDM_SETTINGS,    true  }, { IDM_MANUAL,      false }, { IDM_ELEMENTS, false },
     { IDM_ABOUT,       true  },
 };
 static const int kToolH = 46, kToolBtn = 34, kToolPad = 6, kToolSep = 12;
@@ -251,6 +256,20 @@ static void DrawToolIcon(HDC dc, int id, const RECT &r, bool enabled)
             Polygon(dc, pr, 3);
             SelectObject(dc, pen); SelectObject(dc, GetStockObject(NULL_BRUSH));
             DeleteObject(b); DeleteObject(p2);
+            break;
+        }
+        case IDM_ELEMENTS: {                         // table grid with a pencil
+            Rectangle(dc, r.left+6, r.top+8, r.right-12, r.bottom-10);
+            MoveToEx(dc, r.left+6, cy-1, nullptr);   LineTo(dc, r.right-12, cy-1);
+            MoveToEx(dc, (r.left+r.right)/2-5, r.top+8, nullptr);
+            LineTo(dc, (r.left+r.right)/2-5, r.bottom-10);
+            {
+                HPEN p2 = CreatePen(PS_SOLID, 2, cTeal);
+                SelectObject(dc, p2);
+                MoveToEx(dc, r.right-13, r.bottom-6, nullptr); LineTo(dc, r.right-4, r.bottom-15);
+                SelectObject(dc, pen);
+                DeleteObject(p2);
+            }
             break;
         }
         case IDM_ABOUT: {
@@ -492,6 +511,43 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
         SetTextColor(dc, kGridGray);
         TextOutA(dc, x - 8, plot.bottom + 8, lbl, len);
     }
+    // x-axis title, centered under the tick labels
+    {
+        const char *xt = "Retention Time";
+        SIZE sz; GetTextExtentPoint32A(dc, xt, (int)strlen(xt), &sz);
+        SetTextColor(dc, kGridGray);
+        TextOutA(dc, (plot.left + plot.right) / 2 - sz.cx / 2, plot.bottom + 24, xt, (int)strlen(xt));
+    }
+
+    // y-axis tick labels (detector signal, counts) + light gridlines
+    {
+        const int nticks = 5;
+        for(int t = 0; t <= nticks; t++) {
+            double v = ymin + yspan * t / nticks;
+            int yy = Y(v);
+            HPEN gridPen = CreatePen(PS_DOT, 1, RGB(225,227,229));
+            SelectObject(dc, gridPen);
+            MoveToEx(dc, plot.left, yy, nullptr); LineTo(dc, plot.right, yy);
+            SelectObject(dc, frame);
+            DeleteObject(gridPen);
+            MoveToEx(dc, plot.left - 5, yy, nullptr); LineTo(dc, plot.left, yy);
+            char lbl[16]; int len = std::snprintf(lbl, sizeof lbl, "%ld", (long)v);
+            SIZE sz; GetTextExtentPoint32A(dc, lbl, len, &sz);
+            SetTextColor(dc, kGridGray);
+            TextOutA(dc, plot.left - 9 - sz.cx, yy - 7, lbl, len);
+        }
+        // y-axis title, vertical, along the left margin
+        HFONT vfont = CreateFontA(-13, 0, 900, 900, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                  VARIABLE_PITCH | FF_SWISS, "Segoe UI");
+        HGDIOBJ oldVFont = SelectObject(dc, vfont);
+        const char *yt = "Detector Signal (counts)";
+        SetTextColor(dc, kGridGray);
+        TextOutA(dc, plot.left - 60, (plot.top + plot.bottom) / 2 + (int)strlen(yt) * 3,
+                yt, (int)strlen(yt));
+        SelectObject(dc, oldVFont);
+        DeleteObject(vfont);
+    }
     SetTextColor(dc, RGB(0,0,0));
 
     if(baseline) {
@@ -628,61 +684,44 @@ static void PaintMain(HDC dc, const RECT &rc)
     int total = bottom - top;
     if(total < 80) return;
     int y = top;
-
-    // ---- Section 1: chromatogram (Table A + Graph A, or live trace, or hint) --
     bool haveData = !g_trace.empty() || running;
-    int primaryH = !haveData ? 40 : running ? total * 42 / 100 : total * 46 / 100;
-    if(primaryH < 40) primaryH = 40;
-    RECT prim = { rc.left, y, rc.right, y + primaryH };
+
+    // ---- Section 1: peak table (or a status banner when idle/empty) ----------
+    int tableH;
+    if(running) tableH = 40;
+    else if(!haveData) tableH = 40;
+    else tableH = 44 + (int)(g_rows.size() < 8 ? g_rows.size() : 8) * 18;
+    RECT tpanel = { rc.left, y, rc.right, y + tableH };
 
     if(running) {
         HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
         SetTextColor(dc, kAccent);
         std::string s = std::string(is_cal ? "CALIBRATING" : "ACQUIRING") + "  \xb7  " +
                         (phase.empty() ? std::string("-") : phase);
-        TextOutA(dc, 20, prim.top + 8, s.c_str(), (int)s.size());
+        TextOutA(dc, 20, tpanel.top + 10, s.c_str(), (int)s.size());
         SelectObject(dc, of);
         SetTextColor(dc, RGB(0,0,0));
-
-        RECT plot = prim;
-        plot.left += 50; plot.right -= 30; plot.top += 34; plot.bottom -= 6;
-        if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
-            if(live.size() >= 2)
-                PaintTrace(dc, plot, live, 0, nullptr,
-                           g_method.data_rate > 0 ? g_method.data_rate : 10);
-            else {
-                HGDIOBJ f2 = SelectObject(dc, g_font_ui);
-                SetTextColor(dc, kGridGray);
-                const char *w = "waiting for the ANALYZE phase...";
-                TextOutA(dc, plot.left, plot.top, w, (int)strlen(w));
-                SelectObject(dc, f2);
-                SetTextColor(dc, RGB(0,0,0));
-            }
-        }
     }
     else if(!haveData) {
         HGDIOBJ of = SelectObject(dc, g_font_ui);
         SetTextColor(dc, kGridGray);
         const char *hint =
             "No data.  Open a chromatogram (File > Open Data) or press Run to start an acquisition.";
-        TextOutA(dc, 20, prim.top + 12, hint, (int)strlen(hint));
+        TextOutA(dc, 20, tpanel.top + 12, hint, (int)strlen(hint));
         SelectObject(dc, of);
         SetTextColor(dc, RGB(0,0,0));
     }
     else {
-        // Table A (compact, capped to the top ~40% of this section)
         HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
         char line[200]; int len;
-        int ty = prim.top + 10;
+        int ty = tpanel.top + 10;
         len = std::snprintf(line, sizeof line,
             "%-4s %-14s %10s %12s %8s %14s %8s %8s  %s",
             "Num", "Name", "Conc", "Height", "%", "Area", "%", "Time", "Alarm");
         SetTextColor(dc, kGridGray);
         TextOutA(dc, 20, ty, line, len); ty += 20;
-
-        int tableCap = prim.top + primaryH * 40 / 100;
         for(const ReportRow &r : g_rows) {
-            if(ty > tableCap) break;
+            if(ty > tpanel.bottom - 14) break;
             const Peak &p = r.peak;
             bool neg = p.Height < 0;
             char num[8], conc[24];
@@ -704,27 +743,14 @@ static void PaintMain(HDC dc, const RECT &rc)
         }
         SetTextColor(dc, RGB(0,0,0));
         SelectObject(dc, oldFont);
-
-        // divider between table and graph
-        RECT div = { rc.left, ty + 4, rc.right, ty + 6 };
-        HBRUSH db = CreateSolidBrush(kAccent);
-        FillRect(dc, &div, db);
-        DeleteObject(db);
-
-        RECT plot = { rc.left + 50, ty + 18, rc.right - 30, prim.top + primaryH - 4 };
-        if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50)
-            PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
     }
-    y += primaryH;
-
-    // divider before the acquisition strip
+    y += tableH;
     { RECT div = { rc.left, y, rc.right, y + 3 };
       HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
     y += 3;
 
     // ---- Section 2: acquisition status (always visible, up/down stack) -------
-    int acqH = 78;
-    if(y + acqH + 60 > bottom) acqH = bottom - y - 60 > 30 ? bottom - y - 60 : 30;
+    int acqH = 60;
     {
         RECT panel = { rc.left, y, rc.right, y + acqH };
         char hdr[120];
@@ -734,13 +760,12 @@ static void PaintMain(HDC dc, const RECT &rc)
         HGDIOBJ of = SelectObject(dc, g_font_ui);
         char line[200]; int len; int tx = 20, ty = aTop + 4;
         SetTextColor(dc, kAccent);
-        len = std::snprintf(line, sizeof line, "Backend: %s   Phase: %s",
-                            g_method.hw.backend.c_str(), phase.empty() ? "-" : phase.c_str());
+        len = std::snprintf(line, sizeof line, "Backend: %s   Phase: %s   Points: %zu",
+                            g_method.hw.backend.c_str(), phase.empty() ? "-" : phase.c_str(),
+                            live.size());
         TextOutA(dc, tx, ty, line, len);
-        ty += 20; tx = 20;
+        tx += 460;
         SetTextColor(dc, RGB(30,32,34));
-        len = std::snprintf(line, sizeof line, "Points: %zu", live.size());
-        TextOutA(dc, tx, ty, line, len); tx += 110;
         for(auto &z : zones) {
             len = std::snprintf(line, sizeof line, "%s  %.1f \xb0""C", z.first.c_str(), z.second);
             TextOutA(dc, tx, ty, line, len); tx += 150;
@@ -749,15 +774,14 @@ static void PaintMain(HDC dc, const RECT &rc)
         SelectObject(dc, of);
     }
     y += acqH;
-
-    // divider before the element table
     { RECT div = { rc.left, y, rc.right, y + 3 };
       HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
     y += 3;
 
-    // ---- Section 3: element table (component list, fills remaining space) ----
-    if(y < bottom) {
-        RECT panel = { rc.left, y, rc.right, bottom };
+    // ---- Section 3: element table (component list, compact) ------------------
+    int elemH = 71 + (int)(g_method.components.size() < 8 ? g_method.components.size() : 8) * 17;
+    {
+        RECT panel = { rc.left, y, rc.right, y + elemH };
         char hdr[120];
         std::snprintf(hdr, sizeof hdr, "ELEMENT TABLE  \xb7  %zu COMPONENTS  \xb7  %s METHOD",
                       g_method.components.size(),
@@ -774,7 +798,7 @@ static void PaintMain(HDC dc, const RECT &rc)
         TextOutA(dc, 20, ty, line, len); ty += 19;
 
         for(size_t i = 0; i < g_method.components.size(); i++) {
-            if(ty > bottom - 16) break;
+            if(ty > panel.bottom - 14) break;
             const Component &c = g_method.components[i];
             char cal[96] = ""; size_t off = 0;
             for(int s = 0; s < STAND_NUM64 && off + 16 < sizeof cal; s++)
@@ -802,8 +826,43 @@ static void PaintMain(HDC dc, const RECT &rc)
                              : c.active_yn ? RGB(30,32,34) : kGridGray);
             TextOutA(dc, 20, ty, line, len); ty += 17;
         }
+        if(g_method.components.empty()) {
+            SetTextColor(dc, kGridGray);
+            const char *e = "(no components -- Options > Edit Element Table to add some)";
+            TextOutA(dc, 20, ty, e, (int)strlen(e));
+        }
         SetTextColor(dc, RGB(0,0,0));
         SelectObject(dc, oldFont);
+    }
+    y += elemH;
+    { RECT div = { rc.left, y, rc.right, y + 3 };
+      HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
+    y += 3;
+
+    // ---- Section 4: chromatogram, bottom-most and largest -- the same 40px
+    // bottom margin the original single-panel layout used, so the time-axis
+    // tick labels and axis title always have room and are never painted over
+    // by a panel below them. ----------------------------------------------------
+    if(y < bottom) {
+        RECT plot = { rc.left + 70, y + 8, rc.right - 30, bottom - 40 };
+        if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
+            if(running) {
+                if(live.size() >= 2)
+                    PaintTrace(dc, plot, live, 0, nullptr,
+                               g_method.data_rate > 0 ? g_method.data_rate : 10);
+                else {
+                    HGDIOBJ f2 = SelectObject(dc, g_font_ui);
+                    SetTextColor(dc, kGridGray);
+                    const char *w = "waiting for the ANALYZE phase...";
+                    TextOutA(dc, plot.left, plot.top, w, (int)strlen(w));
+                    SelectObject(dc, f2);
+                    SetTextColor(dc, RGB(0,0,0));
+                }
+            }
+            else if(haveData) {
+                PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
+            }
+        }
     }
 }
 
@@ -1090,6 +1149,254 @@ static void ShowManualWindow(HINSTANCE inst)
     ShowWindow(g_manualwnd, SW_SHOW);
 }
 
+// ---- element table editor -------------------------------------------------------
+// Legacy Edit Components dialog equivalent: define/edit components with a
+// retention time, RT window, response factor and alarm limits, in a grid
+// (SysListView32). Edits happen on a working copy (g_elem_edit); Apply &
+// Close copies it into g_method.components and reprocesses the loaded
+// chromatogram; Cancel discards it. Existing calibration (stand[]/cal[])
+// is preserved since edited components are copied, not reconstructed.
+static std::vector<Component> g_elem_edit;
+static HWND g_elemeditwnd = nullptr;
+static HWND g_el_list = nullptr, g_el_name = nullptr, g_el_rt = nullptr,
+           g_el_window = nullptr, g_el_response = nullptr, g_el_ahigh = nullptr,
+           g_el_alow = nullptr, g_el_active = nullptr, g_el_status = nullptr;
+static int g_el_selected = -1;
+
+static void RefreshElList()
+{
+    if(!g_el_list) return;
+    ListView_DeleteAllItems(g_el_list);
+    for(size_t i = 0; i < g_elem_edit.size(); i++) {
+        const Component &c = g_elem_edit[i];
+        LVITEMA it = {};
+        it.mask = LVIF_TEXT;
+        it.iItem = (int)i;
+        char name[64]; std::snprintf(name, sizeof name, "%s", c.name.c_str());
+        it.pszText = name;
+        int row = ListView_InsertItem(g_el_list, &it);
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%g", c.peak_rt);   ListView_SetItemText(g_el_list, row, 1, buf);
+        std::snprintf(buf, sizeof buf, "%g", c.window);    ListView_SetItemText(g_el_list, row, 2, buf);
+        std::snprintf(buf, sizeof buf, "%g", c.response);  ListView_SetItemText(g_el_list, row, 3, buf);
+        std::snprintf(buf, sizeof buf, "%g", c.alarm_high);ListView_SetItemText(g_el_list, row, 4, buf);
+        std::snprintf(buf, sizeof buf, "%g", c.alarm_low); ListView_SetItemText(g_el_list, row, 5, buf);
+        ListView_SetItemText(g_el_list, row, 6, (LPSTR)(c.active_yn ? "Yes" : "No"));
+    }
+    if(g_el_status) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf, "%zu component(s) pending \xb7 Apply to update the loaded method",
+                      g_elem_edit.size());
+        SetWindowTextA(g_el_status, buf);
+    }
+}
+
+static void SetElEditNum(HWND edit, double v)
+{
+    char b[32]; std::snprintf(b, sizeof b, "%g", v);
+    SetWindowTextA(edit, b);
+}
+static double GetElEditNum(HWND edit)
+{
+    char b[64] = ""; GetWindowTextA(edit, b, sizeof b);
+    return std::atof(b);
+}
+
+static void PopulateElFields(int idx)
+{
+    if(idx < 0 || idx >= (int)g_elem_edit.size()) return;
+    const Component &c = g_elem_edit[(size_t)idx];
+    SetWindowTextA(g_el_name, c.name.c_str());
+    SetElEditNum(g_el_rt, c.peak_rt);
+    SetElEditNum(g_el_window, c.window);
+    SetElEditNum(g_el_response, c.response);
+    SetElEditNum(g_el_ahigh, c.alarm_high);
+    SetElEditNum(g_el_alow, c.alarm_low);
+    SendMessageA(g_el_active, BM_SETCHECK, c.active_yn ? BST_CHECKED : BST_UNCHECKED, 0);
+    g_el_selected = idx;
+}
+
+static void ClearElFields()
+{
+    SetWindowTextA(g_el_name, "");
+    SetElEditNum(g_el_rt, 0);
+    SetElEditNum(g_el_window, 5);
+    SetElEditNum(g_el_response, 0);
+    SetElEditNum(g_el_ahigh, 0);
+    SetElEditNum(g_el_alow, 0);
+    SendMessageA(g_el_active, BM_SETCHECK, BST_CHECKED, 0);
+    g_el_selected = -1;
+    ListView_SetItemState(g_el_list, -1, 0, LVIS_SELECTED);
+}
+
+// reads the edit fields into c, leaving c.stand[]/c.cal[] (calibration) untouched
+static bool ReadElFieldsInto(HWND hwnd, Component &c)
+{
+    char name[64] = "";
+    GetWindowTextA(g_el_name, name, sizeof name);
+    if(!name[0]) {
+        MessageBoxA(hwnd, "Component name is required.", "WPEAK64 Element Table",
+                    MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    c.name        = name;
+    c.peak_rt     = GetElEditNum(g_el_rt);
+    c.window      = GetElEditNum(g_el_window);
+    c.response    = GetElEditNum(g_el_response);
+    c.alarm_high  = GetElEditNum(g_el_ahigh);
+    c.alarm_low   = GetElEditNum(g_el_alow);
+    c.active_yn   = SendMessageA(g_el_active, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    return true;
+}
+
+static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg) {
+        case WM_CREATE: {
+            HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
+            g_el_list = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
+                WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
+                12, 12, 558, 200, hwnd, (HMENU)(UINT_PTR)IDC_EL_LIST, inst, nullptr);
+            ListView_SetExtendedListViewStyle(g_el_list, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+            struct { const char *t; int w; } cols[] = {
+                { "Name", 130 }, { "RT (s)", 60 }, { "Window (s)", 75 },
+                { "Response", 75 }, { "AlarmHi", 60 }, { "AlarmLo", 60 }, { "Active", 55 },
+            };
+            for(int i = 0; i < 7; i++) {
+                LVCOLUMNA col = {};
+                col.mask = LVCF_TEXT | LVCF_WIDTH;
+                col.cx = cols[i].w;
+                col.pszText = (LPSTR)cols[i].t;
+                ListView_InsertColumn(g_el_list, i, &col);
+            }
+            SendMessageA(g_el_list, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            int y = 224;
+            auto label = [&](const char *text, int x, int yy, int w) {
+                CreateWindowA("STATIC", text, WS_CHILD | WS_VISIBLE, x, yy, w, 18,
+                             hwnd, nullptr, inst, nullptr);
+            };
+            label("Name", 12, y + 3, 60);
+            g_el_name = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 200, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_NAME, inst, nullptr);
+            y += 28;
+            label("RT (s)", 12, y + 3, 60);
+            g_el_rt = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_RT, inst, nullptr);
+            label("Window (s)", 172, y + 3, 70);
+            g_el_window = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                250, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_WINDOW, inst, nullptr);
+            y += 28;
+            label("Response", 12, y + 3, 60);
+            g_el_response = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_RESPONSE, inst, nullptr);
+            y += 28;
+            label("Alarm High", 12, y + 3, 70);
+            g_el_ahigh = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_AHIGH, inst, nullptr);
+            label("Alarm Low", 172, y + 3, 70);
+            g_el_alow = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                250, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_ALOW, inst, nullptr);
+            y += 30;
+            g_el_active = CreateWindowA("BUTTON", "Active",
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                12, y, 90, 22, hwnd, (HMENU)(UINT_PTR)IDC_EL_ACTIVE, inst, nullptr);
+            y += 32;
+
+            HWND badd = CreateWindowA("BUTTON", "Add New", WS_CHILD | WS_VISIBLE,
+                12, y, 110, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_ADD, inst, nullptr);
+            HWND bupd = CreateWindowA("BUTTON", "Update Selected", WS_CHILD | WS_VISIBLE,
+                128, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_UPDATE, inst, nullptr);
+            HWND bdel = CreateWindowA("BUTTON", "Delete Selected", WS_CHILD | WS_VISIBLE,
+                264, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_DELETE, inst, nullptr);
+            y += 34;
+            g_el_status = CreateWindowA("STATIC", "", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                12, y, 558, 18, hwnd, nullptr, inst, nullptr);
+            y += 22;
+            HWND note = CreateWindowA("STATIC",
+                "Standards (std1..std8) and calibration are set via the method file or Run > Start Calibration.",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 558, 18, hwnd, nullptr, inst, nullptr);
+            y += 28;
+            HWND bapply = CreateWindowA("BUTTON", "Apply && Close",
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                332, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_APPLY, inst, nullptr);
+            HWND bcancel = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE,
+                448, y, 100, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_CANCEL, inst, nullptr);
+
+            for(HWND h : { g_el_name, g_el_rt, g_el_window, g_el_response, g_el_ahigh,
+                          g_el_alow, g_el_active, badd, bupd, bdel, note, bapply, bcancel })
+                SendMessageA(h, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            RefreshElList();
+            ClearElFields();
+            return 0;
+        }
+        case WM_NOTIFY: {
+            LPNMHDR nh = (LPNMHDR)lp;
+            if(nh->idFrom == IDC_EL_LIST && nh->code == LVN_ITEMCHANGED) {
+                LPNMLISTVIEW nlv = (LPNMLISTVIEW)lp;
+                if(nlv->uNewState & LVIS_SELECTED)
+                    PopulateElFields(nlv->iItem);
+            }
+            return 0;
+        }
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            if(id == IDC_EL_ADD) {
+                Component c;
+                if(ReadElFieldsInto(hwnd, c)) {
+                    g_elem_edit.push_back(c);
+                    RefreshElList();
+                    ListView_SetItemState(g_el_list, (int)g_elem_edit.size() - 1,
+                                          LVIS_SELECTED, LVIS_SELECTED);
+                    PopulateElFields((int)g_elem_edit.size() - 1);
+                }
+                return 0;
+            }
+            if(id == IDC_EL_UPDATE) {
+                if(g_el_selected >= 0 && g_el_selected < (int)g_elem_edit.size()) {
+                    if(ReadElFieldsInto(hwnd, g_elem_edit[(size_t)g_el_selected]))
+                        RefreshElList();
+                }
+                else
+                    MessageBoxA(hwnd, "Select a component in the list first.",
+                                "WPEAK64 Element Table", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+            if(id == IDC_EL_DELETE) {
+                if(g_el_selected >= 0 && g_el_selected < (int)g_elem_edit.size()) {
+                    g_elem_edit.erase(g_elem_edit.begin() + g_el_selected);
+                    RefreshElList();
+                    ClearElFields();
+                }
+                return 0;
+            }
+            if(id == IDC_EL_APPLY) {
+                g_method.components = g_elem_edit;
+                ReprocessTrace();
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if(id == IDC_EL_CANCEL) { DestroyWindow(hwnd); return 0; }
+            return 0;
+        }
+        case WM_CLOSE:   DestroyWindow(hwnd); return 0;
+        case WM_DESTROY: g_elemeditwnd = nullptr; return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void ShowElementEditor(HINSTANCE inst)
+{
+    if(g_elemeditwnd) { SetForegroundWindow(g_elemeditwnd); return; }
+    g_elem_edit = g_method.components;   // working copy; stand[]/cal[] preserved
+    g_elemeditwnd = CreateWindowA("WPEAK64_ELEMEDIT", "WPEAK64 - Element Table (Edit Components)",
+                                  WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, 600, 560,
+                                  g_main, nullptr, inst, nullptr);
+    ShowWindow(g_elemeditwnd, SW_SHOW);
+}
+
 static std::string FileDialog(HWND hwnd, bool save, const char *filter, const char *defext)
 {
     char buf[MAX_PATH] = "";
@@ -1154,6 +1461,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     return 0;
                 case IDM_MANUAL:
                     ShowManualWindow(inst);
+                    return 0;
+                case IDM_ELEMENTS:
+                    ShowElementEditor(inst);
                     return 0;
                 case IDM_ABOUT:
                     MessageBoxA(hwnd,
@@ -1279,6 +1589,9 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
         return 1;
     }
 
+    INITCOMMONCONTROLSEX icc = { sizeof icc, ICC_LISTVIEW_CLASSES };
+    InitCommonControlsEx(&icc);
+
     WNDCLASSA wc = {};
     wc.hInstance     = hInst;
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
@@ -1288,6 +1601,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassA(&wc);
     wc.lpfnWndProc   = ManualWndProc; wc.lpszClassName = "WPEAK64_MANUAL";
+    RegisterClassA(&wc);
+    wc.lpfnWndProc   = ElemEditWndProc; wc.lpszClassName = "WPEAK64_ELEMEDIT";
     RegisterClassA(&wc);
 
     HMENU file = CreatePopupMenu();
@@ -1306,6 +1621,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     AppendMenuA(run, MF_STRING, IDM_RUN_ABORT, "&Abort");
     HMENU opts = CreatePopupMenu();
     AppendMenuA(opts, MF_STRING, IDM_SETTINGS, "&Detector && Integration...");
+    AppendMenuA(opts, MF_STRING, IDM_ELEMENTS, "Edit &Element Table...");
     AppendMenuA(opts, MF_STRING, IDM_MANUAL,   "&Manual Valve / Relay Control...");
     HMENU help = CreatePopupMenu();
     AppendMenuA(help, MF_STRING, IDM_ABOUT, "&About WPEAK64...");

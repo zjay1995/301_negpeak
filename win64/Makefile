@@ -41,7 +41,7 @@ build/wpeak64_acq.exe: wpeak64_acq.cpp $(ACQ) $(HDRS)
 
 build/wpeak64.exe: wpeak64_gui.cpp $(ACQ) $(HDRS)
 	@mkdir -p build
-	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(ACQ) -o $@ -lgdi32 -luser32 -lcomdlg32
+	$(WINCXX) $(CXXFLAGS) -static -mwindows wpeak64_gui.cpp $(ACQ) -o $@ -lgdi32 -luser32 -lcomdlg32 -lcomctl32
 
 clean:
 	rm -rf build
