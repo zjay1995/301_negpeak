@@ -440,6 +440,11 @@ done:
     g_acq.err = err;
     g_acq.ok = ok;
     g_acq.running = false;
+    // the phase left by the sequencer only reaches "DONE" on a clean finish;
+    // on abort/error it would otherwise stick at whatever phase was active
+    // (e.g. "ANALYZE") forever, contradicting the IDLE status shown once
+    // running goes false. Force it to a state that matches the outcome.
+    if(!ok) g_acq.phase = (err == "aborted") ? "STOPPED" : "ERROR";
     LeaveCriticalSection(&g_acq.cs);
     PostMessageA(g_main, WM_ACQ_DONE, 0, 0);
     return 0;
@@ -788,25 +793,43 @@ static void PaintMain(HDC dc, const RECT &rc)
     y += 3;
 
     // ---- Section 2: acquisition status (always visible, up/down stack) -------
-    int acqH = 60;
+    // One status word (IDLE/RUNNING/STOPPED/ERROR, color-coded) plus a row of
+    // compact fields sized to their actual text (no fixed-offset gaps), and a
+    // second row for zone temperatures only when there are any to show.
+    const char *status = running ? (is_cal ? "CALIBRATING" : "RUNNING")
+                        : phase == "STOPPED" ? "STOPPED"
+                        : phase == "ERROR"   ? "ERROR"
+                        : "IDLE";
+    COLORREF statusColor = running ? kAccent
+                          : phase == "STOPPED" ? kNegOrange
+                          : phase == "ERROR"   ? kAlarmRed
+                          : kGridGray;
+    int acqH = zones.empty() ? 52 : 72;
     {
         RECT panel = { rc.left, y, rc.right, y + acqH };
-        char hdr[120];
-        std::snprintf(hdr, sizeof hdr, "ACQUISITION  \xb7  %s %s",
-                      is_cal ? "CALIBRATION" : "RUN", running ? "IN PROGRESS" : "IDLE");
-        int aTop = DrawSectionHeader(dc, panel, panel.top, hdr);
+        int aTop = DrawSectionHeader(dc, panel, panel.top, "ACQUISITION");
         HGDIOBJ of = SelectObject(dc, g_font_ui);
-        char line[200]; int len; int tx = 20, ty = aTop + 4;
-        SetTextColor(dc, kAccent);
-        len = std::snprintf(line, sizeof line, "Backend: %s   Phase: %s   Points: %zu",
-                            g_method.hw.backend.c_str(), phase.empty() ? "-" : phase.c_str(),
-                            live.size());
-        TextOutA(dc, tx, ty, line, len);
-        tx += 460;
-        SetTextColor(dc, RGB(30,32,34));
-        for(auto &z : zones) {
-            len = std::snprintf(line, sizeof line, "%s  %.1f \xb0""C", z.first.c_str(), z.second);
-            TextOutA(dc, tx, ty, line, len); tx += 150;
+        char buf[64]; int tx = 20, ty = aTop + 6;
+        auto field = [&](const char *text, COLORREF color) {
+            int len = (int)std::strlen(text);
+            SetTextColor(dc, color);
+            TextOutA(dc, tx, ty, text, len);
+            SIZE sz; GetTextExtentPoint32A(dc, text, len, &sz);
+            tx += sz.cx + 22;
+        };
+        field(status, statusColor);
+        std::snprintf(buf, sizeof buf, "Backend: %s", g_method.hw.backend.c_str());
+        field(buf, RGB(30,32,34));
+        std::snprintf(buf, sizeof buf, "Phase: %s", phase.empty() ? "-" : phase.c_str());
+        field(buf, RGB(30,32,34));
+        std::snprintf(buf, sizeof buf, "Points: %zu", live.size());
+        field(buf, RGB(30,32,34));
+        if(!zones.empty()) {
+            tx = 20; ty += 20;
+            for(auto &z : zones) {
+                std::snprintf(buf, sizeof buf, "%s  %.1f\xb0""C", z.first.c_str(), z.second);
+                field(buf, RGB(30,32,34));
+            }
         }
         SetTextColor(dc, RGB(0,0,0));
         SelectObject(dc, of);
@@ -816,8 +839,16 @@ static void PaintMain(HDC dc, const RECT &rc)
       HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
     y += 3;
 
-    // ---- Section 3: element table (component list, compact) ------------------
-    int elemH = 71 + (int)(g_method.components.size() < 8 ? g_method.components.size() : 8) * 17;
+    // ---- Section 3: element table (component list) ---------------------------
+    // Always present, and sized generously: a minimum height so it stays a
+    // prominent fixture even with 0-3 components, growing with the actual
+    // component count (row cap raised from 8 to 14) rather than staying a
+    // cramped 3-row strip.
+    const int kElemMaxRows = 14;
+    int elemRows = (int)(g_method.components.size() < (size_t)kElemMaxRows
+                         ? g_method.components.size() : (size_t)kElemMaxRows);
+    int elemH = 71 + elemRows * 17;
+    if(elemH < 260) elemH = 260;   // always keep a large, prominent panel
     {
         RECT panel = { rc.left, y, rc.right, y + elemH };
         char hdr[120];
@@ -835,8 +866,10 @@ static void PaintMain(HDC dc, const RECT &rc)
         SetTextColor(dc, kGridGray);
         TextOutA(dc, 20, ty, line, len); ty += 19;
 
+        size_t shown = 0;
         for(size_t i = 0; i < g_method.components.size(); i++) {
             if(ty > panel.bottom - 14) break;
+            shown++;
             const Component &c = g_method.components[i];
             char cal[96] = ""; size_t off = 0;
             for(int s = 0; s < STAND_NUM64 && off + 16 < sizeof cal; s++)
@@ -868,6 +901,13 @@ static void PaintMain(HDC dc, const RECT &rc)
             SetTextColor(dc, kGridGray);
             const char *e = "(no components -- Options > Edit Element Table to add some)";
             TextOutA(dc, 20, ty, e, (int)strlen(e));
+        }
+        else if(shown < g_method.components.size()) {
+            SetTextColor(dc, kGridGray);
+            char more[48];
+            int mlen = std::snprintf(more, sizeof more, "... %zu more (resize window to see all)",
+                                     g_method.components.size() - shown);
+            TextOutA(dc, 20, ty, more, mlen);
         }
         SetTextColor(dc, RGB(0,0,0));
         SelectObject(dc, oldFont);
@@ -1674,7 +1714,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     g_main = CreateWindowA("WPEAK64",
                            "GC301c - WPEAK64 (64-bit Windows port)",
                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                           1250, 900, nullptr, menubar, hInst, nullptr);
+                           1250, 1020, nullptr, menubar, hInst, nullptr);
     RunAnalysis(g_main, err);  // refresh title with loaded file names
     ShowWindow(g_main, nShow);
     UpdateWindow(g_main);

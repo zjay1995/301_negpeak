@@ -41,6 +41,11 @@ struct Component {
 };
 
 // Method: detector settings + run parameters + component table + hardware.
+// "Detector A" is the fields below at the top level, unchanged from the
+// original single-detector port. Detector B (legacy NUMDETECTORS=2 -- a
+// second, fully independent detector with its own settings, component
+// table and ADC channel, sampled in the same run) is optional and purely
+// additive: see det_b_enabled and AsDetectorB() below.
 struct Method {
     DetectorSettings det;
     int    data_rate     = 10;    // points per second
@@ -52,6 +57,28 @@ struct Method {
     HardwareConfig        hw;     // [hardware]
     std::vector<TempZone> zones;  // [tempzone] sections
     TimingConfig          timing; // [timing]
+
+    // ---- Detector B (optional second channel, [detector_b]/[component_b]) --
+    bool   det_b_enabled     = false;
+    int    det_b_adc_channel = -1;    // ADC channel for detector B's signal
+    DetectorSettings det_b;
+    int    det_b_detect_meth = 0;
+    bool   det_b_known_peaks = false;
+    std::vector<Component> components_b;
+
+    // A Method-shaped view of detector B's settings, for reuse with
+    // BuildReport/EvaluateAlarms/ConcentrationFromCal/WriteReportCsv (which
+    // all read det/components/detect_meth/known_peaks from a Method) without
+    // duplicating that logic for a second detector.
+    Method AsDetectorB() const
+    {
+        Method m = *this;
+        m.det          = det_b;
+        m.components   = components_b;
+        m.detect_meth  = det_b_detect_meth;
+        m.known_peaks  = det_b_known_peaks;
+        return m;
+    }
 };
 
 // A reported peak: the detected Peak plus identification results.
