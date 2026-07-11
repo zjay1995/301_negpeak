@@ -26,6 +26,40 @@ static std::string Lower(std::string s)
     return s;
 }
 
+// Shared key parsing for [detector]/[detector_b] and [component]/[component_b]
+// -- detector A and B use an identical key set, differing only in which
+// struct fields they land in (Method's top-level fields for A, the det_b_*
+// fields for B). Returns false if the key isn't recognized.
+static bool ParseDetectorSettingKey(DetectorSettings &d, const std::string &key, const std::string &val)
+{
+    if     (key == "segment_width") d.segment_width = std::atoi(val.c_str());
+    else if(key == "nandb_time")    d.NandBtime     = std::atol(val.c_str());
+    else if(key == "nandb_len")     d.NandBlen      = std::atol(val.c_str());
+    else if(key == "min_height")    d.MinHeight     = std::atol(val.c_str());
+    else if(key == "min_area")      d.MinArea       = std::atof(val.c_str());
+    else if(key == "peak_alg")      d.peak_alg      = std::atoi(val.c_str());
+    else if(key == "noise_reduct")  d.noise_reduct  = std::atoi(val.c_str());
+    else return false;
+    return true;
+}
+
+static bool ParseComponentKey(Component &c, const std::string &key, const std::string &val)
+{
+    if     (key == "name")     c.name      = val;
+    else if(key == "rt")       c.peak_rt   = std::atof(val.c_str());
+    else if(key == "window")   c.window    = std::atof(val.c_str());
+    else if(key == "response") c.response  = std::atof(val.c_str());
+    else if(key == "active")   c.active_yn = std::atoi(val.c_str()) != 0;
+    else if(key == "alarm_high") c.alarm_high = std::atof(val.c_str());
+    else if(key == "alarm_low")  c.alarm_low  = std::atof(val.c_str());
+    else if(key.size() == 4 && key.compare(0, 3, "std") == 0 &&
+            key[3] >= '1' && key[3] <= '0' + STAND_NUM64) {
+        c.stand[key[3] - '1'] = std::atof(val.c_str());   // std1..std8
+    }
+    else return false;
+    return true;
+}
+
 bool LoadMethod(const std::string &path, Method &m, std::string &err)
 {
     std::ifstream f(path);
@@ -49,11 +83,16 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
                 m.components.push_back(Component());
                 cur = &m.components.back();
             }
+            else if(section == "component_b") {
+                m.components_b.push_back(Component());
+                cur = &m.components_b.back();
+            }
             else if(section == "tempzone") {
                 m.zones.push_back(TempZone());
                 zone = &m.zones.back();
             }
-            else if(section != "detector" && section != "hardware" && section != "timing") {
+            else if(section != "detector" && section != "detector_b" &&
+                    section != "hardware" && section != "timing") {
                 err = path + ":" + std::to_string(lineno) + ": unknown section [" + section + "]";
                 return false;
             }
@@ -69,32 +108,31 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
         std::string val = Trim(t.substr(eq + 1));
 
         if(section == "detector") {
-            if     (key == "segment_width") m.det.segment_width = std::atoi(val.c_str());
-            else if(key == "nandb_time")    m.det.NandBtime     = std::atol(val.c_str());
-            else if(key == "nandb_len")     m.det.NandBlen      = std::atol(val.c_str());
-            else if(key == "min_height")    m.det.MinHeight     = std::atol(val.c_str());
-            else if(key == "min_area")      m.det.MinArea       = std::atof(val.c_str());
-            else if(key == "peak_alg")      m.det.peak_alg      = std::atoi(val.c_str());
-            else if(key == "noise_reduct")  m.det.noise_reduct  = std::atoi(val.c_str());
+            if(ParseDetectorSettingKey(m.det, key, val)) {}
             else if(key == "detect_meth")   m.detect_meth       = std::atoi(val.c_str());
             else if(key == "known_peaks")   m.known_peaks       = std::atoi(val.c_str()) != 0;
             else if(key == "data_rate")     m.data_rate         = std::atoi(val.c_str());
             else if(key == "analysis_time") m.analysis_time     = std::atol(val.c_str());
             else { err = path + ":" + std::to_string(lineno) + ": unknown detector key '" + key + "'"; return false; }
         }
-        else if(section == "component" && cur) {
-            if     (key == "name")     cur->name      = val;
-            else if(key == "rt")       cur->peak_rt   = std::atof(val.c_str());
-            else if(key == "window")   cur->window    = std::atof(val.c_str());
-            else if(key == "response") cur->response  = std::atof(val.c_str());
-            else if(key == "active")   cur->active_yn = std::atoi(val.c_str()) != 0;
-            else if(key == "alarm_high") cur->alarm_high = std::atof(val.c_str());
-            else if(key == "alarm_low")  cur->alarm_low  = std::atof(val.c_str());
-            else if(key.size() == 4 && key.compare(0, 3, "std") == 0 &&
-                    key[3] >= '1' && key[3] <= '0' + STAND_NUM64) {
-                cur->stand[key[3] - '1'] = std::atof(val.c_str());   // std1..std8
+        // Detector B: a second, independent detector (legacy NUMDETECTORS=2)
+        // sampled in the same run on its own ADC channel. data_rate/
+        // analysis_time are shared (one run, both detectors); everything
+        // else -- segment width, noise window, MinHeight/Area, peak
+        // algorithm, detect method, known-peaks -- is separate.
+        else if(section == "detector_b") {
+            if(ParseDetectorSettingKey(m.det_b, key, val)) {}
+            else if(key == "enabled")       m.det_b_enabled     = std::atoi(val.c_str()) != 0;
+            else if(key == "adc_channel")   m.det_b_adc_channel = std::atoi(val.c_str());
+            else if(key == "detect_meth")   m.det_b_detect_meth = std::atoi(val.c_str());
+            else if(key == "known_peaks")   m.det_b_known_peaks = std::atoi(val.c_str()) != 0;
+            else { err = path + ":" + std::to_string(lineno) + ": unknown detector_b key '" + key + "'"; return false; }
+        }
+        else if((section == "component" || section == "component_b") && cur) {
+            if(!ParseComponentKey(*cur, key, val)) {
+                err = path + ":" + std::to_string(lineno) + ": unknown component key '" + key + "'";
+                return false;
             }
-            else { err = path + ":" + std::to_string(lineno) + ": unknown component key '" + key + "'"; return false; }
         }
         else if(section == "hardware") {
             HardwareConfig &h = m.hw;
@@ -178,8 +216,8 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
     f << "data_rate="     << m.data_rate         << "\n";
     f << "analysis_time=" << m.analysis_time     << "\n";
 
-    for(const Component &c : m.components) {
-        f << "\n[component]\nname=" << c.name << "\n";
+    auto write_component = [&](const Component &c, const char *section) {
+        f << "\n[" << section << "]\nname=" << c.name << "\n";
         std::snprintf(b, sizeof b, "rt=%g\nwindow=%g\nresponse=%g\n",
                       c.peak_rt, c.window, c.response);
         f << b << "active=" << (c.active_yn ? 1 : 0) << "\n";
@@ -190,6 +228,23 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
                 std::snprintf(b, sizeof b, "std%d=%g\n", s + 1, c.stand[s]);
                 f << b;
             }
+    };
+    for(const Component &c : m.components) write_component(c, "component");
+
+    if(m.det_b_enabled) {
+        f << "\n[detector_b]\nenabled=1\n";
+        f << "adc_channel=" << m.det_b_adc_channel << "\n";
+        f << "segment_width=" << m.det_b.segment_width << "\n";
+        f << "nandb_time="    << m.det_b.NandBtime     << "\n";
+        f << "nandb_len="     << m.det_b.NandBlen      << "\n";
+        f << "min_height="    << m.det_b.MinHeight     << "\n";
+        std::snprintf(b, sizeof b, "min_area=%g\n", m.det_b.MinArea); f << b;
+        f << "peak_alg="      << m.det_b.peak_alg      << "\n";
+        f << "noise_reduct="  << m.det_b.noise_reduct  << "\n";
+        f << "detect_meth="   << m.det_b_detect_meth   << "\n";
+        f << "known_peaks="   << (m.det_b_known_peaks ? 1 : 0) << "\n";
+
+        for(const Component &c : m.components_b) write_component(c, "component_b");
     }
 
     const HardwareConfig &h = m.hw;
@@ -399,6 +454,9 @@ bool LoadCalibration(const std::string &path, Method &m, std::string &err)
             cur = nullptr;
             for(Component &c : m.components)
                 if(Lower(c.name) == Lower(val)) { cur = &c; break; }
+            if(!cur)
+                for(Component &c : m.components_b)
+                    if(Lower(c.name) == Lower(val)) { cur = &c; break; }
             if(!cur) {
                 err = path + ":" + std::to_string(lineno) +
                       ": component '" + val + "' not in method";
@@ -432,11 +490,11 @@ bool SaveCalibration(const std::string &path, const Method &m, std::string &err)
     std::ofstream f(path);
     if(!f) { err = "cannot write calibration file: " + path; return false; }
     f << "# GC301c WPEAK64 calibration table (stdN = concentration,response)\n";
-    for(const Component &c : m.components) {
+    auto write_cal = [&](const Component &c) {
         bool any = false;
         for(int i = 0; i < STAND_NUM64; i++)
             if(c.cal[i].valid) any = true;
-        if(!any) continue;
+        if(!any) return;
         f << "\n[calibration]\ncomponent=" << c.name << "\n";
         char buf[96];
         for(int i = 0; i < STAND_NUM64; i++) {
@@ -445,7 +503,9 @@ bool SaveCalibration(const std::string &path, const Method &m, std::string &err)
                           i + 1, c.cal[i].conc, c.cal[i].resp);
             f << buf;
         }
-    }
+    };
+    for(const Component &c : m.components)   write_cal(c);
+    for(const Component &c : m.components_b) write_cal(c);
     return (bool)f;
 }
 

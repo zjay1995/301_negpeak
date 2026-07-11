@@ -5,6 +5,7 @@
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <memory>
 
 namespace wpeak64 {
 
@@ -179,6 +180,13 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
     // --- ANALYZE --- (retention clock starts at injection)
     phase("ANALYZE");
     Integrator integ(m_.det, m_.data_rate, m_.analysis_time);
+    out.has_b = m_.det_b_enabled && m_.det_b_adc_channel >= 0;
+    // Detector B (legacy NUMDETECTORS=2): an independent integrator sampled
+    // on its own ADC channel in the same ANALYZE loop, sharing the run's
+    // timing but not the peak-detection state.
+    std::unique_ptr<Integrator> integ_b;
+    if(out.has_b)
+        integ_b.reset(new Integrator(m_.det_b, m_.data_rate, m_.analysis_time));
     {
         const double dt = 1.0 / m_.data_rate;
         long total = m_.analysis_time * m_.data_rate;
@@ -189,6 +197,14 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
             out.trace.push_back(counts);
             integ.ProcessPoint(counts);
             if(progress) progress->OnPoint(counts);
+            if(progress) progress->OnLivePeaks(integ.peaks, integ.act_thresh);
+            if(integ_b) {
+                long counts_b = h_.adc->ReadCounts(m_.det_b_adc_channel);
+                out.trace_b.push_back(counts_b);
+                integ_b->ProcessPoint(counts_b);
+                if(progress) progress->OnPointB(counts_b);
+                if(progress) progress->OnLivePeaksB(integ_b->peaks, integ_b->act_thresh);
+            }
             if(i % (m_.data_rate * 5) == 0) {        // service heaters ~5 s
                 ServiceTempZones();
                 if(progress)
@@ -225,6 +241,20 @@ bool AcquireRun::Run(AcquireResult &out, bool verbose, std::string &err,
     if(hw.alarm_low_line >= 0)
         h_.out->Set(hw.alarm_low_line, (out.alarm_state & ALARM_LOW) != 0);
 
+    if(integ_b) {
+        Method mb = m_.AsDetectorB();
+        out.noise_b    = integ_b->noise;
+        out.baseline_b = integ_b->act_thresh;
+        out.peaks_b    = integ_b->peaks;
+        out.rows_b     = BuildReport(integ_b->peaks, mb);
+        out.alarm_state_b = EvaluateAlarms(out.rows_b, mb);
+        // detector B alarms drive the same shared alarm lines (OR'd with A)
+        if(hw.alarm_high_line >= 0 && (out.alarm_state_b & ALARM_HIGH))
+            h_.out->Set(hw.alarm_high_line, true);
+        if(hw.alarm_low_line >= 0 && (out.alarm_state_b & ALARM_LOW))
+            h_.out->Set(hw.alarm_low_line, true);
+    }
+
     phase("DONE");
     return true;
 }
@@ -243,6 +273,20 @@ void AcquireRun::UpdateCalibration(Method &m_out, const AcquireResult &res) cons
                 double resp = m_out.detect_meth == 0 ? (double)p.Height : p.Area;
                 c.cal[idx] = { c.stand[idx], resp, true };
                 break;                               // first match wins
+            }
+        }
+    }
+
+    if(!res.has_b) return;
+    for(Component &c : m_out.components_b) {
+        if(!c.active_yn) continue;
+        if(c.stand[idx] <= 0) continue;
+        for(const Peak &p : res.peaks_b) {
+            if(p.Height < 0) continue;
+            if(CheckRT(p, c, m_out.data_rate)) {
+                double resp = m_out.det_b_detect_meth == 0 ? (double)p.Height : p.Area;
+                c.cal[idx] = { c.stand[idx], resp, true };
+                break;
             }
         }
     }

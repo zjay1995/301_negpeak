@@ -31,6 +31,14 @@ struct AcquireResult {
     long noise = 0, baseline = 0;
     std::vector<Peak> peaks;         // raw detected peaks
     int alarm_state = 0;             // OR of ReportRow alarms (AlarmState)
+
+    // ---- Detector B (only populated when Method::det_b_enabled) -------------
+    bool has_b = false;
+    std::vector<long>      trace_b;
+    std::vector<ReportRow> rows_b;
+    long noise_b = 0, baseline_b = 0;
+    std::vector<Peak> peaks_b;
+    int alarm_state_b = 0;
 };
 
 // Observer for live displays (GUI acquisition window): called from the
@@ -40,7 +48,19 @@ public:
     virtual ~AcquireProgress() {}
     virtual void OnPhase(const char *phase) { (void)phase; }
     virtual void OnPoint(long counts) { (void)counts; }
+    virtual void OnPointB(long counts) { (void)counts; }
     virtual void OnZone(const char *name, double temp_c) { (void)name; (void)temp_c; }
+    // Fired every ANALYZE tick with the detector's peak list as it stands so
+    // far (Integrator::peaks -- a peak lands in it the instant it finishes,
+    // so callers get identification results as they happen instead of only
+    // at the end of the run) and the current baseline, so a live display can
+    // draw/identify peaks while the trace is still growing.
+    virtual void OnLivePeaks(const std::vector<Peak> &peaks, long baseline) {
+        (void)peaks; (void)baseline;
+    }
+    virtual void OnLivePeaksB(const std::vector<Peak> &peaks, long baseline) {
+        (void)peaks; (void)baseline;
+    }
     // return true to abort the run between phases/samples
     virtual bool Aborted() { return false; }
 };

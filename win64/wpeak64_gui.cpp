@@ -372,6 +372,8 @@ struct AcqShared {
     std::string phase;
     std::vector<std::pair<std::string,double>> zones;   // name, temp C
     std::vector<long> live;                             // growing trace
+    std::vector<Peak> live_peaks;                        // identified as they finish
+    long live_baseline = 0;
     AcquireResult result;
     std::string err;
     bool ok = false;
@@ -391,6 +393,12 @@ public:
         LeaveCriticalSection(&g_acq.cs);
         Sleep(2);   // pace simulated runs so the live view is watchable;
                     // negligible against real ADC sampling intervals
+    }
+    void OnLivePeaks(const std::vector<Peak> &peaks, long baseline) override {
+        EnterCriticalSection(&g_acq.cs);
+        g_acq.live_peaks = peaks;
+        g_acq.live_baseline = baseline;
+        LeaveCriticalSection(&g_acq.cs);
     }
     void OnZone(const char *name, double temp_c) override {
         EnterCriticalSection(&g_acq.cs);
@@ -467,6 +475,8 @@ static bool StartAcquisition(HWND hwnd, bool is_cal, int standard)
         g_acq.phase = "starting";
         g_acq.zones.clear();
         g_acq.live.clear();
+        g_acq.live_peaks.clear();
+        g_acq.live_baseline = 0;
     }
     LeaveCriticalSection(&g_acq.cs);
     if(busy) {
@@ -692,18 +702,25 @@ static void PaintMain(HDC dc, const RECT &rc)
     std::string phase = g_acq.phase;
     auto zones = g_acq.zones;
     std::vector<long> live = running ? g_acq.live : std::vector<long>();
+    std::vector<Peak> live_peaks = running ? g_acq.live_peaks : std::vector<Peak>();
+    long live_baseline = g_acq.live_baseline;
     LeaveCriticalSection(&g_acq.cs);
 
-    // totals for the % columns (legacy: share of the summed magnitudes)
-    int alarm = ALARM_NONE;
-    double habs = 0, aabs = 0;
-    for(const ReportRow &r : g_rows) {
-        alarm |= r.alarm;
-        habs += r.peak.Height < 0 ? -(double)r.peak.Height : (double)r.peak.Height;
-        aabs += r.peak.Area < 0 ? -r.peak.Area : r.peak.Area;
+    // Peaks are identified on the go: as soon as the Integrator finishes one
+    // (live_peaks grows during ANALYZE, not just at the end of the run), run
+    // it through the same component matchup used for the final report so the
+    // table and the growing trace show identifications immediately.
+    std::vector<ReportRow> liveRows;
+    if(running && !live_peaks.empty()) {
+        liveRows = BuildReport(live_peaks, g_method);
+        EvaluateAlarms(liveRows, g_method);
     }
-    if(habs <= 0) habs = 1;
-    if(aabs <= 0) aabs = 1;
+
+    // alarm state for the status bar: final report OR'd with whatever the
+    // live-identified peaks have tripped so far during a run
+    int alarm = ALARM_NONE;
+    for(const ReportRow &r : g_rows)   alarm |= r.alarm;
+    for(const ReportRow &r : liveRows) alarm |= r.alarm;
 
     // second menu row: icon toolbar (Run/Cal/Stop and file/window shortcuts)
     int top = DrawToolbar(dc, rc, running);
@@ -729,41 +746,38 @@ static void PaintMain(HDC dc, const RECT &rc)
     int y = top;
     bool haveData = !g_trace.empty() || running;
 
-    // ---- Section 1: peak table (or a status banner when idle/empty) ----------
+    // ---- Section 1: peak table -- identified on the go while a run is in
+    // progress (liveRows grows peak-by-peak as the Integrator finishes each
+    // one, so identifications show up immediately, not only once the run
+    // ends), or the final report / an idle-state banner otherwise. ----------
     int tableH;
-    if(running) tableH = 40;
+    // running rows start 20px lower than the idle/final table (tpanel.top+30
+    // vs +10) to leave room for the "ACQUIRING . phase" line above them, so
+    // the panel needs 20px more than the idle formula for the same row count
+    // -- otherwise the last live-identified row gets clipped.
+    if(running) tableH = liveRows.empty() ? 40
+                        : 64 + (int)(liveRows.size() < 8 ? liveRows.size() : 8) * 18;
     else if(!haveData) tableH = 40;
     else tableH = 44 + (int)(g_rows.size() < 8 ? g_rows.size() : 8) * 18;
     RECT tpanel = { rc.left, y, rc.right, y + tableH };
 
-    if(running) {
-        HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
-        SetTextColor(dc, kAccent);
-        std::string s = std::string(is_cal ? "CALIBRATING" : "ACQUIRING") + "  \xb7  " +
-                        (phase.empty() ? std::string("-") : phase);
-        TextOutA(dc, 20, tpanel.top + 10, s.c_str(), (int)s.size());
-        SelectObject(dc, of);
-        SetTextColor(dc, RGB(0,0,0));
-    }
-    else if(!haveData) {
-        HGDIOBJ of = SelectObject(dc, g_font_ui);
-        SetTextColor(dc, kGridGray);
-        const char *hint =
-            "No data.  Open a chromatogram (File > Open Data) or press Run to start an acquisition.";
-        TextOutA(dc, 20, tpanel.top + 12, hint, (int)strlen(hint));
-        SelectObject(dc, of);
-        SetTextColor(dc, RGB(0,0,0));
-    }
-    else {
+    auto draw_row_table = [&](int ty, const std::vector<ReportRow> &rows) {
+        double habs = 0, aabs = 0;
+        for(const ReportRow &r : rows) {
+            habs += r.peak.Height < 0 ? -(double)r.peak.Height : (double)r.peak.Height;
+            aabs += r.peak.Area < 0 ? -r.peak.Area : r.peak.Area;
+        }
+        if(habs <= 0) habs = 1;
+        if(aabs <= 0) aabs = 1;
+
         HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
         char line[200]; int len;
-        int ty = tpanel.top + 10;
         len = std::snprintf(line, sizeof line,
             "%-4s %-14s %10s %12s %8s %14s %8s %8s  %s",
             "Num", "Name", "Conc", "Height", "%", "Area", "%", "Time", "Alarm");
         SetTextColor(dc, kGridGray);
         TextOutA(dc, 20, ty, line, len); ty += 20;
-        for(const ReportRow &r : g_rows) {
+        for(const ReportRow &r : rows) {
             if(ty > tpanel.bottom - 14) break;
             const Peak &p = r.peak;
             bool neg = p.Height < 0;
@@ -786,6 +800,32 @@ static void PaintMain(HDC dc, const RECT &rc)
         }
         SetTextColor(dc, RGB(0,0,0));
         SelectObject(dc, oldFont);
+    };
+
+    if(running) {
+        HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
+        SetTextColor(dc, kAccent);
+        std::string s = std::string(is_cal ? "CALIBRATING" : "ACQUIRING") + "  \xb7  " +
+                        (phase.empty() ? std::string("-") : phase);
+        if(!liveRows.empty())
+            s += "  \xb7  " + std::to_string(liveRows.size()) + " peak(s) identified so far";
+        TextOutA(dc, 20, tpanel.top + 10, s.c_str(), (int)s.size());
+        SelectObject(dc, of);
+        SetTextColor(dc, RGB(0,0,0));
+        if(!liveRows.empty())
+            draw_row_table(tpanel.top + 30, liveRows);
+    }
+    else if(!haveData) {
+        HGDIOBJ of = SelectObject(dc, g_font_ui);
+        SetTextColor(dc, kGridGray);
+        const char *hint =
+            "No data.  Open a chromatogram (File > Open Data) or press Run to start an acquisition.";
+        TextOutA(dc, 20, tpanel.top + 12, hint, (int)strlen(hint));
+        SelectObject(dc, of);
+        SetTextColor(dc, RGB(0,0,0));
+    }
+    else {
+        draw_row_table(tpanel.top + 10, g_rows);
     }
     y += tableH;
     { RECT div = { rc.left, y, rc.right, y + 3 };
@@ -926,7 +966,8 @@ static void PaintMain(HDC dc, const RECT &rc)
         if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
             if(running) {
                 if(live.size() >= 2)
-                    PaintTrace(dc, plot, live, 0, nullptr,
+                    PaintTrace(dc, plot, live, live_baseline,
+                               liveRows.empty() ? nullptr : &liveRows,
                                g_method.data_rate > 0 ? g_method.data_rate : 10);
                 else {
                     HGDIOBJ f2 = SelectObject(dc, g_font_ui);
@@ -979,8 +1020,14 @@ static SetField g_set_fields[] = {
     { "Min peak area",                 nullptr },
     { "Peak algorithm (0=proj 1=skim)",nullptr },
     { "Detect method (0=height 1=area)", nullptr },
+    // ---- Detector B (optional second channel, legacy NUMDETECTORS=2) ------
+    { "Detector B: ADC channel (-1=off)", nullptr },
+    { "Detector B: min peak height",   nullptr },
+    { "Detector B: detect method (0=height 1=area)", nullptr },
 };
-static HWND g_set_known = nullptr;   // known peaks only checkbox
+enum { SETF_DETB_CHANNEL = 9, SETF_DETB_MINHEIGHT = 10, SETF_DETB_DETMETH = 11 };
+static HWND g_set_known = nullptr;      // known peaks only checkbox
+static HWND g_set_detb_enable = nullptr; // enable Detector B checkbox
 
 // re-run the integrator over the currently loaded trace after a settings
 // change (does not reload files, so edits are not clobbered)
@@ -1019,6 +1066,17 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
             int y = 14;
             for(int i = 0; i < nf; i++) {
+                if(i == SETF_DETB_CHANNEL) {
+                    HWND div = CreateWindowA("STATIC", "Detector B (optional second channel):",
+                        WS_CHILD | WS_VISIBLE, 16, y + 3, 340, 20, hwnd, nullptr, inst, nullptr);
+                    SendMessageA(div, WM_SETFONT, (WPARAM)g_font_ui_bold, TRUE);
+                    y += 26;
+                    g_set_detb_enable = CreateWindowA("BUTTON", "Enable Detector B",
+                        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                        16, y, 200, 24, hwnd, nullptr, inst, nullptr);
+                    SendMessageA(g_set_detb_enable, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                    y += 32;
+                }
                 HWND lab = CreateWindowA("STATIC", g_set_fields[i].label,
                     WS_CHILD | WS_VISIBLE, 16, y + 3, 230, 20, hwnd, nullptr, inst, nullptr);
                 g_set_fields[i].edit = CreateWindowA("EDIT", "",
@@ -1050,8 +1108,13 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             SetEditText(g_set_fields[6].edit, g_method.det.MinArea);
             SetEditText(g_set_fields[7].edit, g_method.det.peak_alg);
             SetEditText(g_set_fields[8].edit, g_method.detect_meth);
+            SetEditText(g_set_fields[SETF_DETB_CHANNEL].edit,   g_method.det_b_adc_channel);
+            SetEditText(g_set_fields[SETF_DETB_MINHEIGHT].edit, (double)g_method.det_b.MinHeight);
+            SetEditText(g_set_fields[SETF_DETB_DETMETH].edit,   g_method.det_b_detect_meth);
             SendMessageA(g_set_known, BM_SETCHECK,
                          g_method.known_peaks ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendMessageA(g_set_detb_enable, BM_SETCHECK,
+                         g_method.det_b_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
             return 0;
         }
         case WM_COMMAND:
@@ -1077,6 +1140,11 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_method.detect_meth       = (int)GetEditNum(g_set_fields[8].edit);
                 g_method.known_peaks       =
                     SendMessageA(g_set_known, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                g_method.det_b_enabled     =
+                    SendMessageA(g_set_detb_enable, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                g_method.det_b_adc_channel = (int)GetEditNum(g_set_fields[SETF_DETB_CHANNEL].edit);
+                g_method.det_b.MinHeight   = (long)GetEditNum(g_set_fields[SETF_DETB_MINHEIGHT].edit);
+                g_method.det_b_detect_meth = (int)GetEditNum(g_set_fields[SETF_DETB_DETMETH].edit);
                 ReprocessTrace();
                 DestroyWindow(hwnd);
                 return 0;
@@ -1095,7 +1163,7 @@ static void ShowSettingsWindow(HINSTANCE inst)
     g_setwnd = CreateWindowA("WPEAK64_SET", "WPEAK64 - Settings",
                              WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
                              CW_USEDEFAULT, CW_USEDEFAULT, 400,
-                             14 + 9 * 32 + 36 + 28 + 60,
+                             14 + 12 * 32 + 26 + 32 + 36 + 28 + 60,
                              g_main, nullptr, inst, nullptr);
     ShowWindow(g_setwnd, SW_SHOW);
 }
