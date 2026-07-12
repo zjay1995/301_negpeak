@@ -72,6 +72,7 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
     std::string section;
     Component *cur = nullptr;
     TempZone  *zone = nullptr;
+    AuxRelay  *relay = nullptr;
     std::string line;
     int lineno = 0;
 
@@ -93,6 +94,10 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(section == "tempzone") {
                 m.zones.push_back(TempZone());
                 zone = &m.zones.back();
+            }
+            else if(section == "relay") {
+                m.hw.aux_relays.push_back(AuxRelay());
+                relay = &m.hw.aux_relays.back();
             }
             else if(section != "detector" && section != "detector_b" &&
                     section != "hardware" && section != "timing") {
@@ -194,6 +199,13 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "prog_ramp2_rate")   zone->program.ramp2_rate_c_min = std::atof(val.c_str());
             else if(key == "prog_temp3")        zone->program.temp3_c          = std::atof(val.c_str());
             else { err = path + ":" + std::to_string(lineno) + ": unknown tempzone key '" + key + "'"; return false; }
+        }
+        else if(section == "relay" && relay) {
+            if     (key == "name")     relay->name        = val;
+            else if(key == "line")     relay->line        = std::atoi(val.c_str());
+            else if(key == "on_time")  relay->on_time_s   = std::atol(val.c_str());
+            else if(key == "off_time") relay->off_time_s  = std::atol(val.c_str());
+            else { err = path + ":" + std::to_string(lineno) + ": unknown relay key '" + key + "'"; return false; }
         }
         else if(section == "timing") {
             if     (key == "equil_time")  m.timing.equil_time  = std::atol(val.c_str());
@@ -321,6 +333,11 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
                 z.program.temp2_c, z.program.hold2_s, z.program.ramp2_rate_c_min, z.program.temp3_c);
             f << pb;
         }
+    }
+
+    for(const AuxRelay &r : m.hw.aux_relays) {
+        f << "\n[relay]\nname=" << r.name << "\nline=" << r.line
+          << "\non_time=" << r.on_time_s << "\noff_time=" << r.off_time_s << "\n";
     }
 
     const TimingConfig &t = m.timing;

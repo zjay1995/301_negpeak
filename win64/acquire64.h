@@ -97,6 +97,7 @@ private:
     // ProgramTarget() when the zone has an oven temperature program
     // (tempprogram.h) -- see t_since_inject_.
     double EffectiveSetpoint(const TempZone &z) const;
+    void ServiceAuxRelays();         // auxiliary relay/port schedule (AuxRelay)
     void Tick(double dt);            // sleep or advance simulation
     void AllOff();
     void WriteDacOutputs(const Method &mm, const std::vector<ReportRow> &rows) const;
@@ -105,6 +106,8 @@ private:
     // TempProgram; -1 before injection, so program zones equilibrate at
     // their initial hold temperature first.
     double t_since_inject_ = -1;
+    // seconds since the run started (EQUILIBRATE begins), for AuxRelay.
+    double t_run_ = 0;
 };
 
 } // namespace wpeak64

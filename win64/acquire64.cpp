@@ -52,6 +52,21 @@ bool AcquireRun::ZonesInBand() const
     return true;
 }
 
+// Auxiliary relay/port schedule (legacy Method dialog's R1A/R1B/X3/X4/X5):
+// level-based, re-evaluated every tick against t_run_ (seconds since the
+// run started, i.e. EQUILIBRATE begin) -- independent of the phase-driven
+// valves, which follow phase transitions rather than a fixed clock.
+void AcquireRun::ServiceAuxRelays()
+{
+    for(const AuxRelay &r : m_.hw.aux_relays) {
+        if(r.line < 0) continue;
+        bool on = false;
+        if(r.on_time_s >= 0 && t_run_ >= (double)r.on_time_s) on = true;
+        if(r.off_time_s >= 0 && t_run_ >= (double)r.off_time_s) on = false;
+        h_.out->Set(r.line, on);
+    }
+}
+
 void AcquireRun::Tick(double dt)
 {
     if(h_.sim)
@@ -59,6 +74,8 @@ void AcquireRun::Tick(double dt)
     else
         std::this_thread::sleep_for(
             std::chrono::microseconds((long long)(dt * 1e6)));
+    t_run_ += dt;
+    ServiceAuxRelays();
 }
 
 void AcquireRun::AllOff()
@@ -75,6 +92,8 @@ void AcquireRun::AllOff()
         if(pv >= 0) h_.out->Set(pv, false);
     for(const TempZone &z : m_.zones)
         if(z.heater_line >= 0) h_.out->Set(z.heater_line, false);
+    for(const AuxRelay &r : hw.aux_relays)
+        if(r.line >= 0) h_.out->Set(r.line, false);
 }
 
 // Drive each identified, calibrated component's DAC channel proportional to

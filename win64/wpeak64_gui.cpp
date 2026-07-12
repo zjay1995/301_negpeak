@@ -40,13 +40,22 @@ enum {
     IDM_PRINT_REPORT = 107,
     IDM_RUN_START = 201, IDM_RUN_CAL = 202, IDM_RUN_ABORT = 203,
     IDM_ABOUT = 401, IDM_SETTINGS = 501, IDM_MANUAL = 502, IDM_ELEMENTS = 503,
+    IDM_RELAYS = 504,
     IDC_SET_OK = 601, IDC_SET_CANCEL = 602,
     IDC_MANUAL_BASE = 700,   // + line index, up to ~64 controllable lines
     IDC_EL_LIST = 751, IDC_EL_NAME = 752, IDC_EL_RT = 753, IDC_EL_WINDOW = 754,
     IDC_EL_RESPONSE = 755, IDC_EL_AHIGH = 756, IDC_EL_ALOW = 757, IDC_EL_ACTIVE = 758,
     IDC_EL_ADD = 759, IDC_EL_UPDATE = 760, IDC_EL_DELETE = 761,
     IDC_EL_APPLY = 762, IDC_EL_CANCEL = 763,
-    IDC_EL_DACCH = 764, IDC_EL_DACRANGE = 765,
+    IDC_EL_DACCH = 764, IDC_EL_DACRANGE = 765, IDC_EL_CALIB = 766,
+    IDC_CAL_LIST = 770,
+    IDC_CAL_STD1 = 771, IDC_CAL_STD2 = 772, IDC_CAL_STD3 = 773, IDC_CAL_STD4 = 774,
+    IDC_CAL_STD5 = 775, IDC_CAL_STD6 = 776, IDC_CAL_STD7 = 777, IDC_CAL_STD8 = 778,
+    IDC_CAL_UPDATE = 779, IDC_CAL_APPLY = 780, IDC_CAL_CANCEL = 781,
+    IDC_RL_LIST = 790, IDC_RL_NAME = 791, IDC_RL_LINE = 792,
+    IDC_RL_ONTIME = 793, IDC_RL_OFFTIME = 794,
+    IDC_RL_ADD = 795, IDC_RL_UPDATE = 796, IDC_RL_DELETE = 797,
+    IDC_RL_APPLY = 798, IDC_RL_CANCEL = 799,
     // toolbar icons reused from the original Peak Works software (wpeak64.rc)
     IDB_OPEN = 901, IDB_SAVE = 902, IDB_HELP = 903,
 };
@@ -1427,6 +1436,8 @@ static bool ReadElFieldsInto(HWND hwnd, Component &c)
     return true;
 }
 
+static void ShowCalibrationStandards(HINSTANCE inst, HWND owner);
+
 static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch(msg) {
@@ -1495,15 +1506,18 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 128, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_UPDATE, inst, nullptr);
             HWND bdel = CreateWindowA("BUTTON", "Delete Selected", WS_CHILD | WS_VISIBLE,
                 264, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_DELETE, inst, nullptr);
+            HWND bcalib = CreateWindowA("BUTTON", "Calibration Standards...", WS_CHILD | WS_VISIBLE,
+                404, y, 190, 26, hwnd, (HMENU)(UINT_PTR)IDC_EL_CALIB, inst, nullptr);
             y += 34;
             g_el_status = CreateWindowA("STATIC", "", WS_CHILD | WS_VISIBLE | SS_LEFT,
                 12, y, 658, 18, hwnd, nullptr, inst, nullptr);
             y += 22;
             HWND note = CreateWindowA("STATIC",
-                "Standards (std1..std8) and calibration are set via the method file or Run > Start Calibration.\n"
-                "DAC Channel/Range send a 0-Vref analog output proportional to concentration (see [hardware] dac_i2c_addrs).",
-                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 658, 32, hwnd, nullptr, inst, nullptr);
-            y += 40;
+                "Calibration Standards... sets std1..std8 (select a component first); measured\n"
+                "responses come from Run > Start Calibration. DAC Channel/Range send a 0-Vref\n"
+                "analog output proportional to concentration (see [hardware] dac_i2c_addrs).",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 658, 46, hwnd, nullptr, inst, nullptr);
+            y += 54;
             HWND bapply = CreateWindowA("BUTTON", "Apply && Close",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                 432, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_APPLY, inst, nullptr);
@@ -1512,7 +1526,7 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 
             for(HWND h : { g_el_name, g_el_rt, g_el_window, g_el_response, g_el_ahigh,
                           g_el_alow, g_el_dacch, g_el_dacrange, g_el_active,
-                          badd, bupd, bdel, note, bapply, bcancel })
+                          badd, bupd, bdel, bcalib, note, bapply, bcancel })
                 SendMessageA(h, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
 
             RefreshElList();
@@ -1566,6 +1580,14 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 return 0;
             }
             if(id == IDC_EL_CANCEL) { DestroyWindow(hwnd); return 0; }
+            if(id == IDC_EL_CALIB) {
+                if(g_el_selected >= 0 && g_el_selected < (int)g_elem_edit.size())
+                    ShowCalibrationStandards((HINSTANCE)GetWindowLongPtrA(hwnd, GWLP_HINSTANCE), hwnd);
+                else
+                    MessageBoxA(hwnd, "Select a component in the list first.",
+                                "WPEAK64 Element Table", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
             return 0;
         }
         case WM_CLOSE:   DestroyWindow(hwnd); return 0;
@@ -1574,13 +1596,111 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+// ---- calibration standards dialog (legacy STND_DLG.CPP) -------------------------
+// Edits std1..std8 (the standard concentrations a calibration run measures
+// against) for the component currently selected in the Element Table editor.
+// Measured responses (Component::cal[]) are read-only here -- they only come
+// from an actual Run > Start Calibration or a loaded calibration file.
+static HWND g_calwnd = nullptr;
+static HWND g_cal_std[STAND_NUM64] = {};
+static HWND g_cal_resp[STAND_NUM64] = {};
+static int  g_cal_target = -1;   // index into g_elem_edit being edited
+
+static LRESULT CALLBACK CalStdWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg) {
+        case WM_CREATE: {
+            HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
+            const int ids[STAND_NUM64] = { IDC_CAL_STD1, IDC_CAL_STD2, IDC_CAL_STD3, IDC_CAL_STD4,
+                                           IDC_CAL_STD5, IDC_CAL_STD6, IDC_CAL_STD7, IDC_CAL_STD8 };
+            int y = 46;
+            CreateWindowA("STATIC", "Std #", WS_CHILD | WS_VISIBLE, 12, y, 50, 18, hwnd, nullptr, inst, nullptr);
+            CreateWindowA("STATIC", "Concentration", WS_CHILD | WS_VISIBLE, 70, y, 100, 18, hwnd, nullptr, inst, nullptr);
+            CreateWindowA("STATIC", "Measured response", WS_CHILD | WS_VISIBLE, 210, y, 150, 18, hwnd, nullptr, inst, nullptr);
+            y += 22;
+            for(int i = 0; i < STAND_NUM64; i++) {
+                char lbl[16]; std::snprintf(lbl, sizeof lbl, "Std %d", i + 1);
+                HWND l = CreateWindowA("STATIC", lbl, WS_CHILD | WS_VISIBLE, 12, y + 3, 50, 18, hwnd, nullptr, inst, nullptr);
+                g_cal_std[i] = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                    70, y, 100, 22, hwnd, (HMENU)(UINT_PTR)ids[i], inst, nullptr);
+                g_cal_resp[i] = CreateWindowA("STATIC", "(not calibrated)",
+                    WS_CHILD | WS_VISIBLE, 210, y + 3, 200, 18, hwnd, nullptr, inst, nullptr);
+                SendMessageA(l, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                SendMessageA(g_cal_std[i], WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                SendMessageA(g_cal_resp[i], WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                y += 28;
+            }
+            y += 8;
+            HWND note = CreateWindowA("STATIC",
+                "Measured response comes from Run > Start Calibration (standard N) or a\n"
+                "loaded calibration file -- it can't be typed in here.",
+                WS_CHILD | WS_VISIBLE, 12, y, 400, 32, hwnd, nullptr, inst, nullptr);
+            y += 40;
+            HWND bok = CreateWindowA("BUTTON", "Apply", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                140, y, 96, 28, hwnd, (HMENU)(UINT_PTR)IDC_CAL_APPLY, inst, nullptr);
+            HWND bca = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE,
+                246, y, 96, 28, hwnd, (HMENU)(UINT_PTR)IDC_CAL_CANCEL, inst, nullptr);
+            SendMessageA(note, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            SendMessageA(bok, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            SendMessageA(bca, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            // populate from the target component
+            if(g_cal_target >= 0 && g_cal_target < (int)g_elem_edit.size()) {
+                const Component &c = g_elem_edit[(size_t)g_cal_target];
+                char title[128];
+                std::snprintf(title, sizeof title, "WPEAK64 - Calibration Standards - %s", c.name.c_str());
+                SetWindowTextA(hwnd, title);
+                for(int i = 0; i < STAND_NUM64; i++) {
+                    char b[32]; std::snprintf(b, sizeof b, "%g", c.stand[i]);
+                    SetWindowTextA(g_cal_std[i], b);
+                    if(c.cal[i].valid) {
+                        std::snprintf(b, sizeof b, "%g @ %g", c.cal[i].conc, c.cal[i].resp);
+                        SetWindowTextA(g_cal_resp[i], b);
+                    }
+                }
+            }
+            return 0;
+        }
+        case WM_COMMAND:
+            if(LOWORD(wp) == IDC_CAL_APPLY) {
+                if(g_cal_target >= 0 && g_cal_target < (int)g_elem_edit.size()) {
+                    Component &c = g_elem_edit[(size_t)g_cal_target];
+                    for(int i = 0; i < STAND_NUM64; i++) {
+                        char b[64] = "";
+                        GetWindowTextA(g_cal_std[i], b, sizeof b);
+                        c.stand[i] = std::atof(b);
+                    }
+                    RefreshElList();
+                }
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if(LOWORD(wp) == IDC_CAL_CANCEL) { DestroyWindow(hwnd); return 0; }
+            break;
+        case WM_CLOSE:   DestroyWindow(hwnd); return 0;
+        case WM_DESTROY: g_calwnd = nullptr; return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void ShowCalibrationStandards(HINSTANCE inst, HWND owner)
+{
+    if(g_calwnd) { SetForegroundWindow(g_calwnd); return; }
+    g_cal_target = g_el_selected;
+    g_calwnd = CreateWindowA("WPEAK64_CALSTD", "WPEAK64 - Calibration Standards",
+                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                             CW_USEDEFAULT, CW_USEDEFAULT, 430, 46 + 22 + STAND_NUM64 * 28 + 8 + 40 + 60,
+                             owner, nullptr, inst, nullptr);
+    ShowWindow(g_calwnd, SW_SHOW);
+}
+
 static void ShowElementEditor(HINSTANCE inst)
 {
     if(g_elemeditwnd) { SetForegroundWindow(g_elemeditwnd); return; }
     g_elem_edit = g_method.components;   // working copy; stand[]/cal[] preserved
     g_elemeditwnd = CreateWindowA("WPEAK64_ELEMEDIT", "WPEAK64 - Element Table (Edit Components)",
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                                  CW_USEDEFAULT, CW_USEDEFAULT, 700, 620,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, 700, 634,
                                   g_main, nullptr, inst, nullptr);
     ShowWindow(g_elemeditwnd, SW_SHOW);
 }
@@ -1606,6 +1726,221 @@ static void Reanalyze(HWND hwnd)
     if(!RunAnalysis(hwnd, err))
         MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// ---- valve / port schedule editor (legacy Method dialog's R1A/R1B/X3/X4/X5) -----
+// Edits Method::hw.aux_relays: named GPIO lines that turn on/off at fixed
+// times (seconds since the run starts), independent of the phase-driven
+// sample/inject/purge valves -- for auxiliary triggers, secondary valves,
+// data logging pulses, etc. Same edit-in-place-fields-below-a-list pattern
+// as the Element Table editor.
+static std::vector<AuxRelay> g_relay_edit;
+static HWND g_rl_wnd = nullptr;
+static HWND g_rl_list = nullptr, g_rl_name = nullptr, g_rl_line = nullptr,
+           g_rl_ontime = nullptr, g_rl_offtime = nullptr, g_rl_status = nullptr;
+static int g_rl_selected = -1;
+
+static void RefreshRlList()
+{
+    if(!g_rl_list) return;
+    ListView_DeleteAllItems(g_rl_list);
+    for(size_t i = 0; i < g_relay_edit.size(); i++) {
+        const AuxRelay &r = g_relay_edit[i];
+        LVITEMA it = {};
+        it.mask = LVIF_TEXT;
+        it.iItem = (int)i;
+        char name[64]; std::snprintf(name, sizeof name, "%s", r.name.c_str());
+        it.pszText = name;
+        int row = ListView_InsertItem(g_rl_list, &it);
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%d", r.line); ListView_SetItemText(g_rl_list, row, 1, buf);
+        if(r.on_time_s  >= 0) std::snprintf(buf, sizeof buf, "%lds", r.on_time_s);
+        else                  std::snprintf(buf, sizeof buf, "-");
+        ListView_SetItemText(g_rl_list, row, 2, buf);
+        if(r.off_time_s >= 0) std::snprintf(buf, sizeof buf, "%lds", r.off_time_s);
+        else                  std::snprintf(buf, sizeof buf, "-");
+        ListView_SetItemText(g_rl_list, row, 3, buf);
+    }
+    if(g_rl_status) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf, "%zu relay(s) pending \xb7 Apply to update the loaded method",
+                      g_relay_edit.size());
+        SetWindowTextA(g_rl_status, buf);
+    }
+}
+
+static void PopulateRlFields(int idx)
+{
+    if(idx < 0 || idx >= (int)g_relay_edit.size()) return;
+    const AuxRelay &r = g_relay_edit[(size_t)idx];
+    char b[32];
+    SetWindowTextA(g_rl_name, r.name.c_str());
+    std::snprintf(b, sizeof b, "%d", r.line);      SetWindowTextA(g_rl_line, b);
+    std::snprintf(b, sizeof b, "%ld", r.on_time_s); SetWindowTextA(g_rl_ontime, b);
+    std::snprintf(b, sizeof b, "%ld", r.off_time_s);SetWindowTextA(g_rl_offtime, b);
+    g_rl_selected = idx;
+}
+
+static void ClearRlFields()
+{
+    SetWindowTextA(g_rl_name, "");
+    SetWindowTextA(g_rl_line, "-1");
+    SetWindowTextA(g_rl_ontime, "-1");
+    SetWindowTextA(g_rl_offtime, "-1");
+    g_rl_selected = -1;
+    ListView_SetItemState(g_rl_list, -1, 0, LVIS_SELECTED);
+}
+
+static bool ReadRlFieldsInto(HWND hwnd, AuxRelay &r)
+{
+    char name[64] = "";
+    GetWindowTextA(g_rl_name, name, sizeof name);
+    if(!name[0]) {
+        MessageBoxA(hwnd, "Relay name is required (e.g. R1A, X3).", "WPEAK64 Valve / Port Schedule",
+                    MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    char b[32] = "";
+    r.name = name;
+    GetWindowTextA(g_rl_line, b, sizeof b);      r.line       = std::atoi(b);
+    GetWindowTextA(g_rl_ontime, b, sizeof b);    r.on_time_s  = std::atol(b);
+    GetWindowTextA(g_rl_offtime, b, sizeof b);   r.off_time_s = std::atol(b);
+    return true;
+}
+
+static LRESULT CALLBACK RelayEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch(msg) {
+        case WM_CREATE: {
+            HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
+            g_rl_list = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
+                WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
+                12, 12, 460, 180, hwnd, (HMENU)(UINT_PTR)IDC_RL_LIST, inst, nullptr);
+            ListView_SetExtendedListViewStyle(g_rl_list, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+            struct { const char *t; int w; } cols[] = {
+                { "Name", 140 }, { "GPIO Line", 100 }, { "On Time", 105 }, { "Off Time", 105 },
+            };
+            for(int i = 0; i < 4; i++) {
+                LVCOLUMNA col = {};
+                col.mask = LVCF_TEXT | LVCF_WIDTH;
+                col.cx = cols[i].w;
+                col.pszText = (LPSTR)cols[i].t;
+                ListView_InsertColumn(g_rl_list, i, &col);
+            }
+            SendMessageA(g_rl_list, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            int y = 204;
+            auto label = [&](const char *text, int x, int yy, int w) {
+                CreateWindowA("STATIC", text, WS_CHILD | WS_VISIBLE, x, yy, w, 18,
+                             hwnd, nullptr, inst, nullptr);
+            };
+            label("Name", 12, y + 3, 60);
+            g_rl_name = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 100, 22, hwnd, (HMENU)(UINT_PTR)IDC_RL_NAME, inst, nullptr);
+            label("GPIO Line", 194, y + 3, 70);
+            g_rl_line = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                272, y, 80, 22, hwnd, (HMENU)(UINT_PTR)IDC_RL_LINE, inst, nullptr);
+            y += 28;
+            label("On Time (s)", 12, y + 3, 70);
+            g_rl_ontime = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                80, y, 100, 22, hwnd, (HMENU)(UINT_PTR)IDC_RL_ONTIME, inst, nullptr);
+            label("Off Time (s)", 194, y + 3, 75);
+            g_rl_offtime = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                272, y, 100, 22, hwnd, (HMENU)(UINT_PTR)IDC_RL_OFFTIME, inst, nullptr);
+            y += 32;
+
+            HWND badd = CreateWindowA("BUTTON", "Add New", WS_CHILD | WS_VISIBLE,
+                12, y, 100, 26, hwnd, (HMENU)(UINT_PTR)IDC_RL_ADD, inst, nullptr);
+            HWND bupd = CreateWindowA("BUTTON", "Update Selected", WS_CHILD | WS_VISIBLE,
+                118, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_RL_UPDATE, inst, nullptr);
+            HWND bdel = CreateWindowA("BUTTON", "Delete Selected", WS_CHILD | WS_VISIBLE,
+                254, y, 130, 26, hwnd, (HMENU)(UINT_PTR)IDC_RL_DELETE, inst, nullptr);
+            y += 34;
+            g_rl_status = CreateWindowA("STATIC", "", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                12, y, 460, 18, hwnd, nullptr, inst, nullptr);
+            y += 22;
+            HWND note = CreateWindowA("STATIC",
+                "Times are seconds since run start (0s = EQUILIBRATE).\n"
+                "-1 = disabled; Off Time -1 stays on once triggered.",
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 460, 34, hwnd, nullptr, inst, nullptr);
+            y += 44;
+            HWND bapply = CreateWindowA("BUTTON", "Apply && Close",
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                234, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_RL_APPLY, inst, nullptr);
+            HWND bcancel = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE,
+                350, y, 100, 28, hwnd, (HMENU)(UINT_PTR)IDC_RL_CANCEL, inst, nullptr);
+
+            for(HWND h : { g_rl_name, g_rl_line, g_rl_ontime, g_rl_offtime,
+                          badd, bupd, bdel, note, bapply, bcancel })
+                SendMessageA(h, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+
+            RefreshRlList();
+            ClearRlFields();
+            return 0;
+        }
+        case WM_NOTIFY: {
+            LPNMHDR nh = (LPNMHDR)lp;
+            if(nh->idFrom == IDC_RL_LIST && nh->code == LVN_ITEMCHANGED) {
+                LPNMLISTVIEW nlv = (LPNMLISTVIEW)lp;
+                if(nlv->uNewState & LVIS_SELECTED)
+                    PopulateRlFields(nlv->iItem);
+            }
+            return 0;
+        }
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            if(id == IDC_RL_ADD) {
+                AuxRelay r;
+                if(ReadRlFieldsInto(hwnd, r)) {
+                    g_relay_edit.push_back(r);
+                    RefreshRlList();
+                    ListView_SetItemState(g_rl_list, (int)g_relay_edit.size() - 1,
+                                          LVIS_SELECTED, LVIS_SELECTED);
+                    PopulateRlFields((int)g_relay_edit.size() - 1);
+                }
+                return 0;
+            }
+            if(id == IDC_RL_UPDATE) {
+                if(g_rl_selected >= 0 && g_rl_selected < (int)g_relay_edit.size()) {
+                    if(ReadRlFieldsInto(hwnd, g_relay_edit[(size_t)g_rl_selected]))
+                        RefreshRlList();
+                }
+                else
+                    MessageBoxA(hwnd, "Select a relay in the list first.",
+                                "WPEAK64 Valve / Port Schedule", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+            if(id == IDC_RL_DELETE) {
+                if(g_rl_selected >= 0 && g_rl_selected < (int)g_relay_edit.size()) {
+                    g_relay_edit.erase(g_relay_edit.begin() + g_rl_selected);
+                    RefreshRlList();
+                    ClearRlFields();
+                }
+                return 0;
+            }
+            if(id == IDC_RL_APPLY) {
+                g_method.hw.aux_relays = g_relay_edit;
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            if(id == IDC_RL_CANCEL) { DestroyWindow(hwnd); return 0; }
+            return 0;
+        }
+        case WM_CLOSE:   DestroyWindow(hwnd); return 0;
+        case WM_DESTROY: g_rl_wnd = nullptr; return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void ShowRelayEditor(HINSTANCE inst)
+{
+    if(g_rl_wnd) { SetForegroundWindow(g_rl_wnd); return; }
+    g_relay_edit = g_method.hw.aux_relays;
+    g_rl_wnd = CreateWindowA("WPEAK64_RELAYEDIT", "WPEAK64 - Valve / Port Schedule",
+                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                             CW_USEDEFAULT, CW_USEDEFAULT, 500, 470,
+                             g_main, nullptr, inst, nullptr);
+    ShowWindow(g_rl_wnd, SW_SHOW);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -1652,6 +1987,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     return 0;
                 case IDM_ELEMENTS:
                     ShowElementEditor(inst);
+                    return 0;
+                case IDM_RELAYS:
+                    ShowRelayEditor(inst);
                     return 0;
                 case IDM_ABOUT:
                     MessageBoxA(hwnd,
@@ -1831,6 +2169,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     RegisterClassA(&wc);
     wc.lpfnWndProc   = ElemEditWndProc; wc.lpszClassName = "WPEAK64_ELEMEDIT";
     RegisterClassA(&wc);
+    wc.lpfnWndProc   = CalStdWndProc; wc.lpszClassName = "WPEAK64_CALSTD";
+    RegisterClassA(&wc);
+    wc.lpfnWndProc   = RelayEditWndProc; wc.lpszClassName = "WPEAK64_RELAYEDIT";
+    RegisterClassA(&wc);
 
     HMENU file = CreatePopupMenu();
     AppendMenuA(file, MF_STRING, IDM_OPEN_DATA,   "Open &Data (CSV)...");
@@ -1850,6 +2192,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR lpCmdLine, int nShow)
     HMENU opts = CreatePopupMenu();
     AppendMenuA(opts, MF_STRING, IDM_SETTINGS, "&Detector && Integration...");
     AppendMenuA(opts, MF_STRING, IDM_ELEMENTS, "Edit &Element Table...");
+    AppendMenuA(opts, MF_STRING, IDM_RELAYS,   "Valve / &Port Schedule...");
     AppendMenuA(opts, MF_STRING, IDM_MANUAL,   "&Manual Valve / Relay Control...");
     HMENU help = CreatePopupMenu();
     AppendMenuA(help, MF_STRING, IDM_ABOUT, "&About WPEAK64...");

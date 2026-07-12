@@ -60,6 +60,21 @@ public:
     virtual double LastVolts(int channel) const { (void)channel; return 0; }
 };
 
+// Auxiliary relay/port schedule (legacy Method dialog's R1A/R1B/X3/X4/X5
+// ON/OFF time fields): a named GPIO line that turns on at on_time_s and off
+// at off_time_s, both measured from the start of the run (EQUILIBRATE
+// begins at t=0) -- distinct from the phase-driven valves (sample/inject/
+// purge/cal, which follow the run's phase transitions, not a fixed clock).
+// For user-definable auxiliary outputs: external triggers, secondary
+// valves, data logging pulses, etc. -1 = that edge is disabled (on_time_s
+// -1 never turns on; off_time_s -1 stays on once triggered).
+struct AuxRelay {
+    std::string name;             // e.g. "R1A", "X3" (display only)
+    int  line        = -1;        // GPIO line, -1 = unused
+    long on_time_s   = -1;
+    long off_time_s  = -1;
+};
+
 // ---- configuration (parsed from the method file [hardware] section) ---------
 struct HardwareConfig {
     std::string backend   = "sim";          // "sim" or "ads1115"
@@ -92,6 +107,9 @@ struct HardwareConfig {
     // Empty = no analog outputs configured.
     std::vector<int> dac_i2c_addrs;   // I2C address per DAC channel index
     double dac_vref = 3.3;            // DAC full-scale output voltage
+
+    // auxiliary relay/port schedule, see AuxRelay above ([relay] sections)
+    std::vector<AuxRelay> aux_relays;
 };
 
 // One controlled temperature zone (oven, injector, detector...), read via an
