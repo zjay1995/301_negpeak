@@ -86,8 +86,7 @@ int main(int argc, char **argv)
         bool neg = p.Height < 0;
         if(neg) nneg++; else npos++;
         char num[8], conc[24];
-        if(neg) std::snprintf(num, sizeof num, "-");
-        else    std::snprintf(num, sizeof num, "%d", p.Num);
+        std::snprintf(num, sizeof num, "%d", p.Num);   // one sequence, neg peaks included
         if(r.calibrated) std::snprintf(conc, sizeof conc, "%g", r.concentration);
         else             std::snprintf(conc, sizeof conc, "%s", neg ? "-" : "n/cal");
         std::printf("%-5s %-14s %-8.1f %-9ld %-11.0f %-8.1f %-8.1f %-12s %s\n",

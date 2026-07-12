@@ -575,8 +575,8 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
         const char *alarm = r.alarm == ALARM_NONE ? "" :
                             r.alarm == ALARM_HIGH ? "HIGH" :
                             r.alarm == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
-        std::snprintf(buf, sizeof buf, "%s,%s,%.1f,%ld,%.0f,%.1f,%.1f,%s,%s,%s\n",
-                      neg ? "-" : std::to_string(p.Num).c_str(),
+        std::snprintf(buf, sizeof buf, "%d,%s,%.1f,%ld,%.0f,%.1f,%.1f,%s,%s,%s\n",
+                      p.Num,   // one sequence, negative peaks numbered too
                       r.name.c_str(),
                       (double)p.Time / m.data_rate,
                       p.Height,
@@ -655,7 +655,7 @@ bool WriteReportHtml(const std::string &path, const std::vector<long> &trace,
                             r.alarm == ALARM_HIGH ? "HIGH" :
                             r.alarm == ALARM_LOW  ? "LOW"  : "HIGH+LOW";
         std::string cls = std::string(neg ? "neg " : "") + (r.alarm ? "alarm" : "");
-        f << "<tr class=\"" << cls << "\"><td>" << (neg ? "-" : std::to_string(p.Num))
+        f << "<tr class=\"" << cls << "\"><td>" << p.Num
           << "</td><td>" << HtmlEscape(r.name) << "</td><td>";
         std::snprintf(buf, sizeof buf, "%.1f", (double)p.Time / m.data_rate); f << buf;
         f << "</td><td>" << p.Height << "</td><td>";
@@ -723,7 +723,8 @@ bool WriteReportHtml(const std::string &path, const std::vector<long> &trace,
                 "<line class=\"%s\" x1=\"%.1f\" y1=\"%.1f\" x2=\"%.1f\" y2=\"%.1f\"/>\n",
                 neg ? "pkneg" : "pk", xm, yb, xm, yap);
             f << buf;
-            std::string lbl = neg ? "NEG" : (r.component >= 0 ? r.name : std::to_string(p.Num));
+            std::string lbl = neg ? "NEG " + std::to_string(p.Num)
+                                   : (r.component >= 0 ? r.name : std::to_string(p.Num));
             std::snprintf(buf, sizeof buf,
                 "<text class=\"lbl\" x=\"%.1f\" y=\"%.1f\" text-anchor=\"middle\">%s</text>\n",
                 xm, yap - 4, HtmlEscape(lbl).c_str());

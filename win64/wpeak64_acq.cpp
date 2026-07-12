@@ -90,8 +90,7 @@ static void PrintRowTable(const Method &m, const std::vector<ReportRow> &rows)
         const Peak &p = r.peak;
         bool neg = p.Height < 0;
         char num[8], conc[24];
-        if(neg) std::snprintf(num, sizeof num, "-");
-        else    std::snprintf(num, sizeof num, "%d", p.Num);
+        std::snprintf(num, sizeof num, "%d", p.Num);   // one sequence, neg peaks included
         if(r.calibrated) std::snprintf(conc, sizeof conc, "%g", r.concentration);
         else             std::snprintf(conc, sizeof conc, "%s", neg ? "-" : "n/cal");
         const char *alarm = r.alarm == ALARM_NONE ? "" :

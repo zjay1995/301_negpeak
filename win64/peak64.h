@@ -21,7 +21,9 @@ namespace wpeak64 {
 
 // ---- Peak (from PEAK.H) ----------------------------------------------------
 struct Peak {
-    int     Num        = -1;   // peak #; stays <=0 for negative peaks (not quantified)
+    int     Num        = -1;   // peak #, one continuous elution-order sequence shared
+                                // by positive and negative peaks alike; quantification
+                                // is gated on Height<0, not on Num
     long    Time       = 0;    // retention time (in data points) of the apex
     double  Area       = 0;    // area (double since 2.4.4x, P.P. 08/25/17)
     long    Height     = 0;    // height above baseline; NEGATIVE for negative peaks

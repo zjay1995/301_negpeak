@@ -296,6 +296,11 @@ void Integrator::DetectNegativePeak()
                 neg_peak.From   = neg_start_of_peak;
                 neg_peak.To     = raw_time;
                 neg_peak.Time   = neg_start_of_peak + (raw_time - neg_start_of_peak) / 2;
+                neg_peak.Num    = ++peak.Num;      // shares the running counter with
+                                                    // positive peaks: one continuous
+                                                    // elution-order sequence, negative
+                                                    // peaks included (never quantified,
+                                                    // but still numbered/labeled).
                 peaks.push_back(neg_peak);
             }
         }
@@ -322,7 +327,9 @@ void Integrator::DetectNegativePeak()
             neg_peak.From   = neg_start_of_peak;
             neg_peak.To     = raw_time;
             neg_peak.Time   = neg_start_of_peak + (raw_time - neg_start_of_peak) / 2;
-            // Num stays -1: not numbered/quantified, only drawn.
+            neg_peak.Num    = ++peak.Num;    // numbered in sequence with positive
+                                              // peaks (still never quantified: that's
+                                              // gated on Height<0, not Num).
             peaks.push_back(neg_peak);
         }
         neg_start_of_peak = -1;

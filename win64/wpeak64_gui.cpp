@@ -644,8 +644,14 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
             char lbl[64]; int len;
             SetTextColor(dc, neg ? kNegOrange : kAlarmRed);
             if(neg) {
+                // numbered in the same sequence as positive peaks (see
+                // Integrator::DetectNegativePeak), shown alongside "NEG" so
+                // the negative peak's index is visible on the graph too --
+                // mirrors the positive-peak layout (number, then label).
+                len = std::snprintf(lbl, sizeof lbl, "%d", p.Num);
+                TextOutA(dc, xm - 4, yap + 6, lbl, len);
                 len = std::snprintf(lbl, sizeof lbl, "NEG");
-                TextOutA(dc, xm - 12, yap + 6, lbl, len);
+                TextOutA(dc, xm - 12, yap + 24, lbl, len);
             }
             else {
                 len = std::snprintf(lbl, sizeof lbl, "%d", p.Num);
@@ -798,8 +804,7 @@ static void PaintMain(HDC dc, const RECT &rc)
             const Peak &p = r.peak;
             bool neg = p.Height < 0;
             char num[8], conc[24];
-            if(neg) std::snprintf(num, sizeof num, "-");
-            else    std::snprintf(num, sizeof num, "%d", p.Num);
+            std::snprintf(num, sizeof num, "%d", p.Num);   // one sequence, neg peaks included
             if(r.calibrated) std::snprintf(conc, sizeof conc, "%g", r.concentration);
             else             std::snprintf(conc, sizeof conc, "%s", neg ? "-" : "n/cal");
             const char *al = r.alarm == ALARM_NONE ? "" :
