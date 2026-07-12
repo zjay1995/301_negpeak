@@ -778,10 +778,12 @@ static void PaintMain(HDC dc, const RECT &rc)
     int y = top;
     bool haveData = !g_trace.empty() || running;
 
-    // ---- Section 1: peak table -- identified on the go while a run is in
-    // progress (liveRows grows peak-by-peak as the Integrator finishes each
-    // one, so identifications show up immediately, not only once the run
-    // ends), or the final report / an idle-state banner otherwise. ----------
+    // ---- Section 1: peak table ("Table A", legacy Peak Works naming) --
+    // identified on the go while a run is in progress (liveRows grows
+    // peak-by-peak as the Integrator finishes each one, so identifications
+    // show up immediately, not only once the run ends), or the final report
+    // / an idle-state banner otherwise. --------------------------------------
+    y = DrawSectionHeader(dc, rc, y, "TABLE A");
     int tableH;
     // running rows start 20px lower than the idle/final table (tpanel.top+30
     // vs +10) to leave room for the "ACQUIRING . phase" line above them, so
@@ -994,11 +996,12 @@ static void PaintMain(HDC dc, const RECT &rc)
       HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
     y += 3;
 
-    // ---- Section 4: chromatogram, bottom-most and largest -- the same 40px
-    // bottom margin the original single-panel layout used, so the time-axis
-    // tick labels and axis title always have room and are never painted over
-    // by a panel below them. ----------------------------------------------------
+    // ---- Section 4: chromatogram ("Graph A"), bottom-most and largest -- the
+    // same 40px bottom margin the original single-panel layout used, so the
+    // time-axis tick labels and axis title always have room and are never
+    // painted over by a panel below them. ----------------------------------------
     if(y < bottom) {
+        y = DrawSectionHeader(dc, rc, y, "GRAPH A");
         RECT plot = { rc.left + 70, y + 8, rc.right - 30, bottom - 40 };
         if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
             if(running) {
