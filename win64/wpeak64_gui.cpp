@@ -785,12 +785,13 @@ static void PaintMain(HDC dc, const RECT &rc)
     // / an idle-state banner otherwise. --------------------------------------
     y = DrawSectionHeader(dc, rc, y, "TABLE A");
     int tableH;
-    // running rows start 20px lower than the idle/final table (tpanel.top+30
-    // vs +10) to leave room for the "ACQUIRING . phase" line above them, so
-    // the panel needs 20px more than the idle formula for the same row count
-    // -- otherwise the last live-identified row gets clipped.
+    // Table A now has its own header, and RUNNING/phase/points are already
+    // shown right below in the Acquisition panel -- repeating "ACQUIRING .
+    // phase" here as well was redundant clutter, so the running case uses
+    // the same row-count formula as the idle/final table instead of extra
+    // space for a status line.
     if(running) tableH = liveRows.empty() ? 40
-                        : 64 + (int)(liveRows.size() < 8 ? liveRows.size() : 8) * 18;
+                        : 44 + (int)(liveRows.size() < 8 ? liveRows.size() : 8) * 18;
     else if(!haveData) tableH = 40;
     else tableH = 44 + (int)(g_rows.size() < 8 ? g_rows.size() : 8) * 18;
     RECT tpanel = { rc.left, y, rc.right, y + tableH };
@@ -836,17 +837,16 @@ static void PaintMain(HDC dc, const RECT &rc)
     };
 
     if(running) {
-        HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
-        SetTextColor(dc, kAccent);
-        std::string s = std::string(is_cal ? "CALIBRATING" : "ACQUIRING") + "  \xb7  " +
-                        (phase.empty() ? std::string("-") : phase);
         if(!liveRows.empty())
-            s += "  \xb7  " + std::to_string(liveRows.size()) + " peak(s) identified so far";
-        TextOutA(dc, 20, tpanel.top + 10, s.c_str(), (int)s.size());
-        SelectObject(dc, of);
-        SetTextColor(dc, RGB(0,0,0));
-        if(!liveRows.empty())
-            draw_row_table(tpanel.top + 30, liveRows);
+            draw_row_table(tpanel.top + 10, liveRows);
+        else {
+            HGDIOBJ of = SelectObject(dc, g_font_ui);
+            SetTextColor(dc, kGridGray);
+            const char *w = "Identifying peaks as the run progresses...";
+            TextOutA(dc, 20, tpanel.top + 12, w, (int)strlen(w));
+            SelectObject(dc, of);
+            SetTextColor(dc, RGB(0,0,0));
+        }
     }
     else if(!haveData) {
         HGDIOBJ of = SelectObject(dc, g_font_ui);
@@ -897,6 +897,10 @@ static void PaintMain(HDC dc, const RECT &rc)
         field(buf, RGB(30,32,34));
         std::snprintf(buf, sizeof buf, "Points: %zu", live.size());
         field(buf, RGB(30,32,34));
+        if(running && !liveRows.empty()) {
+            std::snprintf(buf, sizeof buf, "Peaks: %zu", liveRows.size());
+            field(buf, kAccent);
+        }
         if(!zones.empty()) {
             tx = 20; ty += 20;
             for(auto &z : zones) {
