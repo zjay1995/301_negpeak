@@ -57,6 +57,8 @@ struct Method {
     long   analysis_time = 120;   // s
     int    detect_meth   = 0;     // 0 = height, 1 = area (Detector::detect_meth)
     bool   known_peaks   = false; // report matched (known) peaks only
+    std::string det_label = "Detector A";  // display name (legacy Detector dialog Label)
+    std::string det_units;                 // concentration units, e.g. "PPM" (legacy Units); empty = unspecified
     std::vector<Component> components;
 
     HardwareConfig        hw;     // [hardware]
@@ -69,6 +71,8 @@ struct Method {
     DetectorSettings det_b;
     int    det_b_detect_meth = 0;
     bool   det_b_known_peaks = false;
+    std::string det_b_label = "Detector B";
+    std::string det_b_units;
     std::vector<Component> components_b;
 
     // A Method-shaped view of detector B's settings, for reuse with
@@ -82,6 +86,8 @@ struct Method {
         m.components   = components_b;
         m.detect_meth  = det_b_detect_meth;
         m.known_peaks  = det_b_known_peaks;
+        m.det_label    = det_b_label;
+        m.det_units    = det_b_units;
         return m;
     }
 };

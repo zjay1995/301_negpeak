@@ -922,10 +922,16 @@ static void PaintMain(HDC dc, const RECT &rc)
     if(elemH < 260) elemH = 260;   // always keep a large, prominent panel
     {
         RECT panel = { rc.left, y, rc.right, y + elemH };
-        char hdr[120];
-        std::snprintf(hdr, sizeof hdr, "ELEMENT TABLE  \xb7  %zu COMPONENTS  \xb7  %s METHOD",
-                      g_method.components.size(),
-                      g_method.detect_meth == 0 ? "HEIGHT" : "AREA");
+        char hdr[160];
+        if(g_method.det_units.empty())
+            std::snprintf(hdr, sizeof hdr, "ELEMENT TABLE  \xb7  %zu COMPONENTS  \xb7  %s METHOD",
+                          g_method.components.size(),
+                          g_method.detect_meth == 0 ? "HEIGHT" : "AREA");
+        else
+            std::snprintf(hdr, sizeof hdr, "ELEMENT TABLE  \xb7  %zu COMPONENTS  \xb7  %s METHOD  \xb7  %s",
+                          g_method.components.size(),
+                          g_method.detect_meth == 0 ? "HEIGHT" : "AREA",
+                          g_method.det_units.c_str());
         int eTop = DrawSectionHeader(dc, panel, panel.top, hdr);
 
         HGDIOBJ oldFont = SelectObject(dc, g_font_mono);
@@ -1059,6 +1065,8 @@ static SetField g_set_fields[] = {
 enum { SETF_DETB_CHANNEL = 9, SETF_DETB_MINHEIGHT = 10, SETF_DETB_DETMETH = 11 };
 static HWND g_set_known = nullptr;      // known peaks only checkbox
 static HWND g_set_detb_enable = nullptr; // enable Detector B checkbox
+static HWND g_set_label = nullptr, g_set_units = nullptr;       // detector A label/units
+static HWND g_set_label_b = nullptr, g_set_units_b = nullptr;   // detector B label/units
 
 // re-run the integrator over the currently loaded trace after a settings
 // change (does not reload files, so edits are not clobbered)
@@ -1096,6 +1104,17 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_CREATE: {
             HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
             int y = 14;
+            auto str_field = [&](const char *lbl, HWND &edit) {
+                HWND l = CreateWindowA("STATIC", lbl, WS_CHILD | WS_VISIBLE, 16, y + 3, 230, 20,
+                                       hwnd, nullptr, inst, nullptr);
+                edit = CreateWindowA("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                                     252, y, 110, 24, hwnd, nullptr, inst, nullptr);
+                SendMessageA(l, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                SendMessageA(edit, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+                y += 32;
+            };
+            str_field("Detector A label", g_set_label);
+            str_field("Units (e.g. PPM)", g_set_units);
             for(int i = 0; i < nf; i++) {
                 if(i == SETF_DETB_CHANNEL) {
                     HWND div = CreateWindowA("STATIC", "Detector B (optional second channel):",
@@ -1107,6 +1126,8 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         16, y, 200, 24, hwnd, nullptr, inst, nullptr);
                     SendMessageA(g_set_detb_enable, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
                     y += 32;
+                    str_field("Detector B label", g_set_label_b);
+                    str_field("Detector B units", g_set_units_b);
                 }
                 HWND lab = CreateWindowA("STATIC", g_set_fields[i].label,
                     WS_CHILD | WS_VISIBLE, 16, y + 3, 230, 20, hwnd, nullptr, inst, nullptr);
@@ -1146,6 +1167,10 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                          g_method.known_peaks ? BST_CHECKED : BST_UNCHECKED, 0);
             SendMessageA(g_set_detb_enable, BM_SETCHECK,
                          g_method.det_b_enabled ? BST_CHECKED : BST_UNCHECKED, 0);
+            SetWindowTextA(g_set_label, g_method.det_label.c_str());
+            SetWindowTextA(g_set_units, g_method.det_units.c_str());
+            SetWindowTextA(g_set_label_b, g_method.det_b_label.c_str());
+            SetWindowTextA(g_set_units_b, g_method.det_b_units.c_str());
             return 0;
         }
         case WM_COMMAND:
@@ -1176,6 +1201,12 @@ static LRESULT CALLBACK SetWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_method.det_b_adc_channel = (int)GetEditNum(g_set_fields[SETF_DETB_CHANNEL].edit);
                 g_method.det_b.MinHeight   = (long)GetEditNum(g_set_fields[SETF_DETB_MINHEIGHT].edit);
                 g_method.det_b_detect_meth = (int)GetEditNum(g_set_fields[SETF_DETB_DETMETH].edit);
+                { char b[64];
+                  GetWindowTextA(g_set_label,   b, sizeof b); g_method.det_label   = b;
+                  GetWindowTextA(g_set_units,   b, sizeof b); g_method.det_units   = b;
+                  GetWindowTextA(g_set_label_b, b, sizeof b); g_method.det_b_label = b;
+                  GetWindowTextA(g_set_units_b, b, sizeof b); g_method.det_b_units = b;
+                }
                 ReprocessTrace();
                 DestroyWindow(hwnd);
                 return 0;
@@ -1194,7 +1225,7 @@ static void ShowSettingsWindow(HINSTANCE inst)
     g_setwnd = CreateWindowA("WPEAK64_SET", "WPEAK64 - Settings",
                              WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
                              CW_USEDEFAULT, CW_USEDEFAULT, 400,
-                             14 + 12 * 32 + 26 + 32 + 36 + 28 + 60,
+                             14 + 12 * 32 + 26 + 32 + 32 + 32 + 32 + 36 + 28 + 60,
                              g_main, nullptr, inst, nullptr);
     ShowWindow(g_setwnd, SW_SHOW);
 }

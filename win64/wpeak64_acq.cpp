@@ -105,16 +105,19 @@ static void PrintRowTable(const Method &m, const std::vector<ReportRow> &rows)
 
 static void PrintRows(const Method &m, const AcquireResult &res, int point)
 {
-    std::printf("\nPoint %d   Noise=%ld  Baseline=%ld%s\n", point,
+    std::printf("\nPoint %d   %s   Noise=%ld  Baseline=%ld%s%s%s\n", point, m.det_label.c_str(),
                 res.noise, res.baseline,
+                m.det_units.empty() ? "" : "  units=", m.det_units.c_str(),
                 res.alarm_state ? "   *** ALARM ***" : "");
     PrintRowTable(m, res.rows);
 
     if(res.has_b) {
-        std::printf("\nDetector B   Noise=%ld  Baseline=%ld%s\n",
+        Method mb = m.AsDetectorB();
+        std::printf("\nPoint %d   %s   Noise=%ld  Baseline=%ld%s%s%s\n", point, mb.det_label.c_str(),
                     res.noise_b, res.baseline_b,
+                    mb.det_units.empty() ? "" : "  units=", mb.det_units.c_str(),
                     res.alarm_state_b ? "   *** ALARM ***" : "");
-        PrintRowTable(m.AsDetectorB(), res.rows_b);
+        PrintRowTable(mb, res.rows_b);
     }
 }
 

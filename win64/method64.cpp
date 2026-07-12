@@ -121,6 +121,8 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "known_peaks")   m.known_peaks       = std::atoi(val.c_str()) != 0;
             else if(key == "data_rate")     m.data_rate         = std::atoi(val.c_str());
             else if(key == "analysis_time") m.analysis_time     = std::atol(val.c_str());
+            else if(key == "label")         m.det_label         = val;
+            else if(key == "units")         m.det_units         = val;
             else { err = path + ":" + std::to_string(lineno) + ": unknown detector key '" + key + "'"; return false; }
         }
         // Detector B: a second, independent detector (legacy NUMDETECTORS=2)
@@ -134,6 +136,8 @@ bool LoadMethod(const std::string &path, Method &m, std::string &err)
             else if(key == "adc_channel")   m.det_b_adc_channel = std::atoi(val.c_str());
             else if(key == "detect_meth")   m.det_b_detect_meth = std::atoi(val.c_str());
             else if(key == "known_peaks")   m.det_b_known_peaks = std::atoi(val.c_str()) != 0;
+            else if(key == "label")         m.det_b_label       = val;
+            else if(key == "units")         m.det_b_units       = val;
             else { err = path + ":" + std::to_string(lineno) + ": unknown detector_b key '" + key + "'"; return false; }
         }
         else if((section == "component" || section == "component_b") && cur) {
@@ -249,6 +253,8 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
     f << "known_peaks="   << (m.known_peaks ? 1 : 0) << "\n";
     f << "data_rate="     << m.data_rate         << "\n";
     f << "analysis_time=" << m.analysis_time     << "\n";
+    if(!m.det_label.empty()) f << "label=" << m.det_label << "\n";
+    if(!m.det_units.empty()) f << "units=" << m.det_units << "\n";
 
     auto write_component = [&](const Component &c, const char *section) {
         f << "\n[" << section << "]\nname=" << c.name << "\n";
@@ -281,6 +287,8 @@ bool SaveMethod(const std::string &path, const Method &m, std::string &err)
         f << "noise_reduct="  << m.det_b.noise_reduct  << "\n";
         f << "detect_meth="   << m.det_b_detect_meth   << "\n";
         f << "known_peaks="   << (m.det_b_known_peaks ? 1 : 0) << "\n";
+        if(!m.det_b_label.empty()) f << "label=" << m.det_b_label << "\n";
+        if(!m.det_b_units.empty()) f << "units=" << m.det_b_units << "\n";
 
         for(const Component &c : m.components_b) write_component(c, "component_b");
     }
@@ -576,9 +584,11 @@ bool WriteReportCsv(const std::string &path, const std::vector<ReportRow> &rows,
     std::ofstream f(path);
     if(!f) { err = "cannot write report file: " + path; return false; }
 
-    f << "# GC301c WPEAK64 peak report\n";
+    f << "# GC301c WPEAK64 peak report -- " << m.det_label << "\n";
     f << "# noise=" << noise << " baseline=" << baseline
-      << " detect_meth=" << (m.detect_meth == 0 ? "height" : "area") << "\n";
+      << " detect_meth=" << (m.detect_meth == 0 ? "height" : "area");
+    if(!m.det_units.empty()) f << " units=" << m.det_units;
+    f << "\n";
     f << "num,component,rt_s,height,area,from_s,to_s,concentration,type,alarm\n";
     char buf[256];
     for(const ReportRow &r : rows) {
@@ -655,9 +665,10 @@ bool WriteReportHtml(const std::string &path, const std::vector<long> &trace,
          "@media print{body{margin:0;} svg{border:none;}}\n"
          "</style></head><body>\n"
       << "<h1>GC301c Gas Chromatograph &mdash; WPEAK64 Peak Report</h1>\n"
-      << "<div class=\"meta\">Generated " << tbuf
+      << "<div class=\"meta\">" << HtmlEscape(m.det_label) << " &middot; Generated " << tbuf
       << " &middot; Noise=" << noise << " Baseline=" << baseline
-      << " &middot; " << (m.detect_meth == 0 ? "height" : "area") << " method</div>\n";
+      << " &middot; " << (m.detect_meth == 0 ? "height" : "area") << " method"
+      << (m.det_units.empty() ? "" : " &middot; units: " + HtmlEscape(m.det_units)) << "</div>\n";
 
     f << "<table><thead><tr><th>Num</th><th>Component</th><th>RT (s)</th>"
          "<th>Height</th><th>Area</th><th>From (s)</th><th>To (s)</th>"

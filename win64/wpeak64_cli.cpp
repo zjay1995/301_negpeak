@@ -73,9 +73,10 @@ int main(int argc, char **argv)
     std::printf("Data: %s   Method: %s\n",
                 synthetic ? "(synthetic demo)" : data_path.c_str(),
                 method_path.empty() ? "(defaults)" : method_path.c_str());
-    std::printf("Noise=%ld  Baseline=%ld  (data rate %d pts/s, analysis time %ld s, %s method)\n\n",
-                integ.noise, integ.act_thresh, m.data_rate, m.analysis_time,
-                m.detect_meth == 0 ? "height" : "area");
+    std::printf("%s -- Noise=%ld  Baseline=%ld  (data rate %d pts/s, analysis time %ld s, %s method%s%s)\n\n",
+                m.det_label.c_str(), integ.noise, integ.act_thresh, m.data_rate, m.analysis_time,
+                m.detect_meth == 0 ? "height" : "area",
+                m.det_units.empty() ? "" : ", units ", m.det_units.c_str());
 
     std::printf("%-5s %-14s %-8s %-9s %-11s %-8s %-8s %-12s %s\n",
                 "Num", "Component", "RT (s)", "Height", "Area",
