@@ -48,6 +48,7 @@ enum {
     IDC_EL_ADD = 759, IDC_EL_UPDATE = 760, IDC_EL_DELETE = 761,
     IDC_EL_APPLY = 762, IDC_EL_CANCEL = 763,
     IDC_EL_DACCH = 764, IDC_EL_DACRANGE = 765, IDC_EL_CALIB = 766,
+    IDC_EL_DETA = 767, IDC_EL_DETB = 768,
     IDC_CAL_LIST = 770,
     IDC_CAL_STD1 = 771, IDC_CAL_STD2 = 772, IDC_CAL_STD3 = 773, IDC_CAL_STD4 = 774,
     IDC_CAL_STD5 = 775, IDC_CAL_STD6 = 776, IDC_CAL_STD7 = 777, IDC_CAL_STD8 = 778,
@@ -1329,15 +1330,20 @@ static void ShowManualWindow(HINSTANCE inst)
 // Legacy Edit Components dialog equivalent: define/edit components with a
 // retention time, RT window, response factor and alarm limits, in a grid
 // (SysListView32). Edits happen on a working copy (g_elem_edit); Apply &
-// Close copies it into g_method.components and reprocesses the loaded
-// chromatogram; Cancel discards it. Existing calibration (stand[]/cal[])
-// is preserved since edited components are copied, not reconstructed.
-static std::vector<Component> g_elem_edit;
+// Close copies it into g_method.components/components_b and reprocesses the
+// loaded chromatogram; Cancel discards it. Existing calibration (stand[]/
+// cal[]) is preserved since edited components are copied, not reconstructed.
+// Detector A and B (legacy "Component table 'Detector A'"/"'Detector B'")
+// share this one editor -- g_elem_edit holds whichever is currently shown;
+// g_elem_edit_other stashes the other one's pending edits across a toggle.
+static std::vector<Component> g_elem_edit, g_elem_edit_other;
+static bool g_el_showing_b = false;
 static HWND g_elemeditwnd = nullptr;
 static HWND g_el_list = nullptr, g_el_name = nullptr, g_el_rt = nullptr,
            g_el_window = nullptr, g_el_response = nullptr, g_el_ahigh = nullptr,
            g_el_alow = nullptr, g_el_active = nullptr, g_el_status = nullptr,
-           g_el_dacch = nullptr, g_el_dacrange = nullptr;
+           g_el_dacch = nullptr, g_el_dacrange = nullptr,
+           g_el_deta = nullptr, g_el_detb = nullptr;
 static int g_el_selected = -1;
 
 static void RefreshElList()
@@ -1443,9 +1449,18 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
     switch(msg) {
         case WM_CREATE: {
             HINSTANCE inst = ((LPCREATESTRUCTA)lp)->hInstance;
+            g_el_deta = CreateWindowA("BUTTON", "Detector A components",
+                WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
+                12, 12, 170, 20, hwnd, (HMENU)(UINT_PTR)IDC_EL_DETA, inst, nullptr);
+            g_el_detb = CreateWindowA("BUTTON", "Detector B components",
+                WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
+                190, 12, 170, 20, hwnd, (HMENU)(UINT_PTR)IDC_EL_DETB, inst, nullptr);
+            SendMessageA(g_el_deta, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            SendMessageA(g_el_detb, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
+            SendMessageA(g_el_showing_b ? g_el_detb : g_el_deta, BM_SETCHECK, BST_CHECKED, 0);
             g_el_list = CreateWindowExA(WS_EX_CLIENTEDGE, WC_LISTVIEWA, "",
                 WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
-                12, 12, 658, 200, hwnd, (HMENU)(UINT_PTR)IDC_EL_LIST, inst, nullptr);
+                12, 38, 658, 200, hwnd, (HMENU)(UINT_PTR)IDC_EL_LIST, inst, nullptr);
             ListView_SetExtendedListViewStyle(g_el_list, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
             struct { const char *t; int w; } cols[] = {
                 { "Name", 120 }, { "RT (s)", 55 }, { "Window (s)", 70 },
@@ -1461,7 +1476,7 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
             }
             SendMessageA(g_el_list, WM_SETFONT, (WPARAM)g_font_ui, TRUE);
 
-            int y = 224;
+            int y = 250;
             auto label = [&](const char *text, int x, int yy, int w) {
                 CreateWindowA("STATIC", text, WS_CHILD | WS_VISIBLE, x, yy, w, 18,
                              hwnd, nullptr, inst, nullptr);
@@ -1516,8 +1531,8 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 "Calibration Standards... sets std1..std8 (select a component first); measured\n"
                 "responses come from Run > Start Calibration. DAC Channel/Range send a 0-Vref\n"
                 "analog output proportional to concentration (see [hardware] dac_i2c_addrs).",
-                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 658, 46, hwnd, nullptr, inst, nullptr);
-            y += 54;
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 12, y, 658, 52, hwnd, nullptr, inst, nullptr);
+            y += 60;
             HWND bapply = CreateWindowA("BUTTON", "Apply && Close",
                 WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
                 432, y, 110, 28, hwnd, (HMENU)(UINT_PTR)IDC_EL_APPLY, inst, nullptr);
@@ -1574,12 +1589,23 @@ static LRESULT CALLBACK ElemEditWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
                 return 0;
             }
             if(id == IDC_EL_APPLY) {
-                g_method.components = g_elem_edit;
+                if(g_el_showing_b) { g_method.components_b = g_elem_edit; g_method.components = g_elem_edit_other; }
+                else                { g_method.components   = g_elem_edit; g_method.components_b = g_elem_edit_other; }
                 ReprocessTrace();
                 DestroyWindow(hwnd);
                 return 0;
             }
             if(id == IDC_EL_CANCEL) { DestroyWindow(hwnd); return 0; }
+            if((id == IDC_EL_DETA || id == IDC_EL_DETB) && HIWORD(wp) == BN_CLICKED) {
+                bool want_b = id == IDC_EL_DETB;
+                if(want_b != g_el_showing_b) {
+                    std::swap(g_elem_edit, g_elem_edit_other);
+                    g_el_showing_b = want_b;
+                    RefreshElList();
+                    ClearElFields();
+                }
+                return 0;
+            }
             if(id == IDC_EL_CALIB) {
                 if(g_el_selected >= 0 && g_el_selected < (int)g_elem_edit.size())
                     ShowCalibrationStandards((HINSTANCE)GetWindowLongPtrA(hwnd, GWLP_HINSTANCE), hwnd);
@@ -1697,10 +1723,12 @@ static void ShowCalibrationStandards(HINSTANCE inst, HWND owner)
 static void ShowElementEditor(HINSTANCE inst)
 {
     if(g_elemeditwnd) { SetForegroundWindow(g_elemeditwnd); return; }
-    g_elem_edit = g_method.components;   // working copy; stand[]/cal[] preserved
+    g_el_showing_b = false;
+    g_elem_edit       = g_method.components;    // working copy; stand[]/cal[] preserved
+    g_elem_edit_other = g_method.components_b;
     g_elemeditwnd = CreateWindowA("WPEAK64_ELEMEDIT", "WPEAK64 - Element Table (Edit Components)",
                                   WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
-                                  CW_USEDEFAULT, CW_USEDEFAULT, 700, 634,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, 700, 672,
                                   g_main, nullptr, inst, nullptr);
     ShowWindow(g_elemeditwnd, SW_SHOW);
 }
