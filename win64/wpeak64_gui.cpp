@@ -560,11 +560,36 @@ static bool StartAcquisition(HWND hwnd, bool is_cal, int standard)
 }
 
 // ---- analysis of files / synthetic demo --------------------------------------
+// Dummy element table for the no-method-file demo path: three components at
+// the synthetic chromatogram's positive-peak retention times (see
+// synth64.h DefaultPeaks()), named after a common BTEX panel like the
+// reference "Span Calibration" instrument, with fixed response factors so
+// the demo shows calibrated concentrations instead of "n/cal".
+static void AddDemoComponents(Method &m)
+{
+    auto add = [&](const char *name, double rt, double response,
+                   double alarm_high, double alarm_low) {
+        Component c;
+        c.name       = name;
+        c.peak_rt    = rt;
+        c.window     = 5;
+        c.response   = response;
+        c.alarm_high = alarm_high;
+        c.alarm_low  = alarm_low;
+        m.components.push_back(c);
+    };
+    add("Benzene",      40, 0.010, 100, 5);
+    add("Toluene",      60, 0.020, 120, 5);
+    add("Ethylbenzene", 105, 0.050, 100, 5);
+}
+
 static bool RunAnalysis(HWND hwnd, std::string &err)
 {
     Method m;
     m.det.MinHeight = 20;                     // demo default
-    if(!g_method_path.empty() && !LoadMethod(g_method_path, m, err))
+    if(g_method_path.empty())
+        AddDemoComponents(m);
+    else if(!LoadMethod(g_method_path, m, err))
         return false;
     if(!g_cal_path.empty()) {
         std::string cerr;
