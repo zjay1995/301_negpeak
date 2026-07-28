@@ -58,6 +58,9 @@ enum {
     IDC_RL_ONTIME = 793, IDC_RL_OFFTIME = 794,
     IDC_RL_ADD = 795, IDC_RL_UPDATE = 796, IDC_RL_DELETE = 797,
     IDC_RL_APPLY = 798, IDC_RL_CANCEL = 799,
+    // main-window control panel cards (Start/Stop, Cal Valve, Span)
+    IDC_CTRL_START = 810, IDC_CTRL_STOP = 811, IDC_CTRL_VALVE_TOGGLE = 812,
+    IDC_CTRL_SET_SPAN = 813, IDC_CTRL_SPAN = 814,
     // toolbar icons reused from the original Peak Works software (wpeak64.rc)
     IDB_OPEN = 901, IDB_SAVE = 902, IDB_HELP = 903,
 };
@@ -79,6 +82,15 @@ static std::string            g_cal_path;     // calibration file (optional)
 static HWND g_main = nullptr;
 static HWND g_manualwnd = nullptr;   // Manual Valve/Relay Control (holds a Hardware conn.)
 static bool g_autorun = false;   // /autorun: start a run at launch
+
+// ---- main-window control panel (Start/Stop, Cal Valve Control, Span) ------
+// Button rects are recomputed every PaintMain (layout is dynamic -- the
+// panel's y depends on the element table's row count), then hit-tested by
+// WM_LBUTTONDOWN against this frame's rects, the same immediate-mode
+// pattern the icon toolbar already uses for its fixed-position buttons.
+struct CtrlRects { RECT start, stop, valve, setspan, span; bool valid = false; };
+static CtrlRects g_ctrl_rects;
+static bool g_cal_valve_on = false;   // local shadow of the last commanded state
 
 // ---- modern industrial style -------------------------------------------------
 // Segoe UI for labels/headers (falls back to Tahoma/Arial where missing),
@@ -1050,13 +1062,14 @@ static void PaintMain(HDC dc, const RECT &rc)
       HBRUSH db = CreateSolidBrush(kAccent); FillRect(dc, &div, db); DeleteObject(db); }
     y += 3;
 
-    // ---- Section 4: chromatogram ("Graph A"), bottom-most and largest -- the
-    // same 40px bottom margin the original single-panel layout used, so the
-    // time-axis tick labels and axis title always have room and are never
-    // painted over by a panel below them. ----------------------------------------
+    // ---- Section 4: chromatogram ("Graph A") -- the same 40px bottom margin
+    // the original single-panel layout used (so the time-axis tick labels
+    // and axis title always have room), plus kControlsH reserved below it
+    // for the Section 5 control panel. -------------------------------------
+    const int kControlsH = 122;
     if(y < bottom) {
         y = DrawSectionHeader(dc, rc, y, "GRAPH A");
-        RECT plot = { rc.left + 70, y + 8, rc.right - 30, bottom - 40 };
+        RECT plot = { rc.left + 70, y + 8, rc.right - 30, bottom - 40 - kControlsH };
         if(plot.right - plot.left >= 50 && plot.bottom - plot.top >= 50) {
             if(running) {
                 if(live.size() >= 2)
@@ -1076,6 +1089,82 @@ static void PaintMain(HDC dc, const RECT &rc)
                 PaintTrace(dc, plot, g_trace, g_baseline, &g_rows, g_method.data_rate);
             }
         }
+    }
+
+    // ---- Section 5: control panel -- Start/Stop, Cal Valve Control, Set
+    // Span Target/Span, three rounded cards docked at the bottom (matching
+    // a span-calibration instrument's persistent control row). ----------------
+    {
+        int ctrlTop = bottom - kControlsH;
+        int hTop = DrawSectionHeader(dc, rc, ctrlTop, "CONTROLS");
+        int cardTop = hTop + 4, cardH = kControlsH - (hTop + 4 - ctrlTop) - 8;
+        if(cardH < 40) cardH = 40;
+        const int gap = 12;
+        int cardW = (rc.right - rc.left - 4 * gap) / 3;
+        int cx = rc.left + gap;
+
+        auto draw_card = [&](const char *title) {
+            RECT card = { cx, cardTop, cx + cardW, cardTop + cardH };
+            HPEN pen = CreatePen(PS_SOLID, 1, kGridGray);
+            HGDIOBJ oldPen = SelectObject(dc, pen);
+            HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+            HBRUSH cardBg = CreateSolidBrush(RGB(241, 243, 247));
+            HGDIOBJ oldBg = SelectObject(dc, cardBg);
+            RoundRect(dc, card.left, card.top, card.right, card.bottom, 10, 10);
+            SelectObject(dc, oldBg); DeleteObject(cardBg);
+            SelectObject(dc, oldPen); SelectObject(dc, oldBrush);
+            DeleteObject(pen);
+            HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
+            SetTextColor(dc, RGB(60, 66, 74));
+            TextOutA(dc, card.left + 10, card.top + 6, title, (int)strlen(title));
+            SelectObject(dc, of);
+            SetTextColor(dc, RGB(0,0,0));
+            cx += cardW + gap;
+            return card;
+        };
+        auto draw_btn = [&](RECT r, const char *label, COLORREF bg, bool enabled) {
+            HBRUSH brush = CreateSolidBrush(enabled ? bg : RGB(206, 209, 214));
+            HGDIOBJ oldBrush = SelectObject(dc, brush);
+            HPEN pen = CreatePen(PS_SOLID, 1, RGB(160, 164, 170));
+            HGDIOBJ oldPen = SelectObject(dc, pen);
+            RoundRect(dc, r.left, r.top, r.right, r.bottom, 6, 6);
+            SelectObject(dc, oldBrush); SelectObject(dc, oldPen);
+            DeleteObject(brush); DeleteObject(pen);
+            HGDIOBJ of = SelectObject(dc, g_font_ui_bold);
+            SetTextColor(dc, enabled ? RGB(255,255,255) : RGB(120,124,130));
+            SIZE sz; GetTextExtentPoint32A(dc, label, (int)strlen(label), &sz);
+            TextOutA(dc, r.left + (r.right - r.left - sz.cx) / 2,
+                        r.top + (r.bottom - r.top - sz.cy) / 2, label, (int)strlen(label));
+            SelectObject(dc, of);
+            SetTextColor(dc, RGB(0,0,0));
+        };
+
+        // Card 1: RUN CONTROL -- Start / Stop
+        RECT card1 = draw_card("RUN CONTROL");
+        int by = card1.top + 28, bh = card1.bottom - by - 10;
+        int bw = (cardW - 30) / 2;
+        g_ctrl_rects.start = { card1.left + 10, by, card1.left + 10 + bw, by + bh };
+        g_ctrl_rects.stop  = { g_ctrl_rects.start.right + 10, by,
+                               g_ctrl_rects.start.right + 10 + bw, by + bh };
+        draw_btn(g_ctrl_rects.start, "Start", RGB(46, 158, 90), !running);
+        draw_btn(g_ctrl_rects.stop,  "Stop",  kAlarmRed, running);
+
+        // Card 2: CAL VALVE CONTROL -- live ON/OFF toggle
+        RECT card2 = draw_card("CAL VALVE CONTROL");
+        g_ctrl_rects.valve = { card2.left + 10, card2.top + 28,
+                               card2.right - 10, card2.bottom - 10 };
+        draw_btn(g_ctrl_rects.valve, g_cal_valve_on ? "ON" : "OFF",
+                g_cal_valve_on ? RGB(46, 158, 90) : RGB(110, 116, 124), true);
+
+        // Card 3: CALIBRATION -- Set Span Target / Span
+        RECT card3 = draw_card("CALIBRATION");
+        int by3 = card3.top + 28, bh3 = (card3.bottom - by3 - 14) / 2;
+        g_ctrl_rects.setspan = { card3.left + 10, by3, card3.right - 10, by3 + bh3 };
+        g_ctrl_rects.span    = { card3.left + 10, by3 + bh3 + 4, card3.right - 10, by3 + bh3 * 2 + 4 };
+        draw_btn(g_ctrl_rects.setspan, "Set Span Target...", kAccent, !running);
+        draw_btn(g_ctrl_rects.span, is_cal ? "Spanning..." : "Span", kAccent, !running);
+
+        g_ctrl_rects.valid = true;
     }
 }
 
@@ -1412,6 +1501,43 @@ static void ShowManualWindow(HINSTANCE inst)
                                CW_USEDEFAULT, CW_USEDEFAULT, 330, h,
                                g_main, nullptr, inst, nullptr);
     ShowWindow(g_manualwnd, SW_SHOW);
+}
+
+// On-demand cal-valve toggle for the main-window "CAL VALVE CONTROL" card:
+// opens a transient Hardware connection just long enough to flip the valve
+// line, then closes it -- the same busy-guards as Manual Control (which
+// holds a persistent connection instead) so the two never fight over the
+// hardware.
+static void ToggleCalValve(HWND hwnd)
+{
+    EnterCriticalSection(&g_acq.cs);
+    bool running = g_acq.running;
+    LeaveCriticalSection(&g_acq.cs);
+    if(running) {
+        MessageBoxA(hwnd, "Cannot toggle the cal valve while an acquisition is running.",
+                    "WPEAK64", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if(g_manualwnd) {
+        MessageBoxA(hwnd, "Close Manual Control before toggling the cal valve here.",
+                    "WPEAK64", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if(g_method.hw.cal_valve < 0) {
+        MessageBoxA(hwnd, "No cal valve line is configured in [hardware].",
+                    "WPEAK64", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    Hardware h;
+    std::string err;
+    if(!OpenHardware(g_method.hw, g_method.zones, 1.0, h, err)) {
+        MessageBoxA(hwnd, err.c_str(), "WPEAK64", MB_OK | MB_ICONERROR);
+        return;
+    }
+    g_cal_valve_on = !g_cal_valve_on;
+    h.out->Set(g_method.hw.cal_valve, g_cal_valve_on);
+    CloseHardware(h);
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 // ---- element table editor -------------------------------------------------------
@@ -2175,6 +2301,25 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     LeaveCriticalSection(&g_acq.cs);
                     return 0;
                 case IDM_EXIT:     DestroyWindow(hwnd);  return 0;
+                case IDC_CTRL_START:                  // CONTROLS card: Start
+                    if(StartAcquisition(hwnd, false, 0))
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                case IDC_CTRL_STOP:                    // CONTROLS card: Stop
+                    EnterCriticalSection(&g_acq.cs);
+                    g_acq.abort_req = true;
+                    LeaveCriticalSection(&g_acq.cs);
+                    return 0;
+                case IDC_CTRL_VALVE_TOGGLE:
+                    ToggleCalValve(hwnd);
+                    return 0;
+                case IDC_CTRL_SET_SPAN:                // pick/edit the component + its standards
+                    ShowElementEditor(inst);
+                    return 0;
+                case IDC_CTRL_SPAN:                     // CONTROLS card: Span (standard 1)
+                    if(StartAcquisition(hwnd, true, 1))
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
             }
             break;
         case WM_ACQ_DONE: {
@@ -2208,8 +2353,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(hwnd, nullptr, FALSE);   // element table is part of g_main now
             return 0;
         }
-        case WM_LBUTTONDOWN: {   // toolbar icon clicks
-            int id = ToolbarButtonAt((int)(short)LOWORD(lp), (int)(short)HIWORD(lp));
+        case WM_LBUTTONDOWN: {   // toolbar icon clicks + control panel cards
+            int px = (int)(short)LOWORD(lp), py = (int)(short)HIWORD(lp);
+            int id = ToolbarButtonAt(px, py);
+            if(!id && g_ctrl_rects.valid) {
+                POINT pt = { px, py };
+                if(PtInRect(&g_ctrl_rects.start,   pt)) id = IDC_CTRL_START;
+                else if(PtInRect(&g_ctrl_rects.stop,    pt)) id = IDC_CTRL_STOP;
+                else if(PtInRect(&g_ctrl_rects.valve,   pt)) id = IDC_CTRL_VALVE_TOGGLE;
+                else if(PtInRect(&g_ctrl_rects.setspan, pt)) id = IDC_CTRL_SET_SPAN;
+                else if(PtInRect(&g_ctrl_rects.span,    pt)) id = IDC_CTRL_SPAN;
+            }
             if(id) PostMessageA(hwnd, WM_COMMAND, (WPARAM)id, 0);
             return 0;
         }
