@@ -640,6 +640,18 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
     if(baseline) { if(baseline < ymin) ymin = baseline; if(baseline > ymax) ymax = baseline; }
     long yspan = ymax - ymin; if(yspan < 1) yspan = 1;
     ymin -= yspan / 10; ymax += yspan / 10; yspan = ymax - ymin;
+    // Reserve extra headroom above the tallest point for the 3-line peak
+    // label stack (name / area / height) drawn above each apex -- otherwise
+    // a tall peak's label collides with the GRAPH A header strip above the
+    // plot. Sized in pixels (not a value-space fraction) so it holds up
+    // regardless of the plot's actual height.
+    {
+        int plotH = plot.bottom - plot.top; if(plotH < 1) plotH = 1;
+        const int kLabelPadPx = 70;
+        double valPerPx = (double)yspan / plotH;
+        ymax += (long)(kLabelPadPx * valPerPx);
+        yspan = ymax - ymin; if(yspan < 1) yspan = 1;
+    }
     const long n = (long)trace.size();
 
     auto X = [&](double i) { return plot.left + (int)((double)(plot.right - plot.left) * i / (n - 1)); };
