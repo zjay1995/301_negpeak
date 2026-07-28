@@ -27,6 +27,7 @@
 #include <shellapi.h>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include "peak64.h"
 #include "method64.h"
@@ -87,14 +88,37 @@ static HFONT g_font_ui = nullptr, g_font_ui_bold = nullptr, g_font_mono = nullpt
 // null if the resource failed to load, in which case DrawToolIcon falls
 // back to its GDI-drawn equivalent.
 static HBITMAP g_bmp_open = nullptr, g_bmp_save = nullptr, g_bmp_help = nullptr;
-static const COLORREF kHeaderBg   = RGB(38, 42, 48);    // charcoal
-static const COLORREF kHeaderFg   = RGB(235, 238, 240);
-static const COLORREF kAccent     = RGB(0, 120, 155);   // industrial teal
-static const COLORREF kAlarmRed   = RGB(198, 40, 40);
-static const COLORREF kNegOrange  = RGB(198, 110, 0);
-static const COLORREF kTraceBlue  = RGB(20, 90, 180);
+// touchscreen-HMI navy palette (matches a modern span-calibration instrument
+// display: deep navy header/panels, per-component colors carried through
+// consistently from the table into the trace labels)
+static const COLORREF kHeaderBg   = RGB(23, 41, 79);     // deep navy
+static const COLORREF kHeaderFg   = RGB(240, 244, 250);
+static const COLORREF kAccent     = RGB(43, 98, 191);    // instrument blue
+static const COLORREF kAlarmRed   = RGB(211, 47, 47);
+static const COLORREF kNegOrange  = RGB(214, 96, 20);
+static const COLORREF kTraceBlue  = RGB(33, 105, 201);
 static const COLORREF kBaseGreen  = RGB(0, 140, 70);
 static const COLORREF kGridGray   = RGB(120, 126, 132);
+
+// per-component colors, cycled by Method::components index -- the same
+// color identifies a component in the peak table, the element table and
+// its trace label, matching the reference instrument's colored component
+// legend (Benzene/Toluene/... each in their own consistent color).
+static const COLORREF kCompColors[] = {
+    RGB(33, 105, 201),    // blue
+    RGB(224, 108, 22),    // orange
+    RGB(45, 45, 48),      // near-black
+    RGB(0, 150, 150),     // teal
+    RGB(196, 30, 58),     // red
+    RGB(124, 82, 189),    // purple
+    RGB(178, 140, 0),     // gold
+    RGB(0, 132, 90),      // green
+};
+static COLORREF CompColor(int idx)
+{
+    if(idx < 0) return kAlarmRed;   // unidentified peak: no assigned color
+    return kCompColors[(size_t)idx % (sizeof kCompColors / sizeof kCompColors[0])];
+}
 
 static void CreateFonts()
 {
@@ -133,10 +157,11 @@ static void DrawBmpIcon(HDC dc, HBITMAP bmp, const RECT &r)
     DeleteDC(mem);
 }
 
-// bottom status bar: charcoal strip with teal-separated info segments;
-// returns the y coordinate content must stay above
+// bottom status bar: navy strip with blue-separated info segments and a
+// colored system-status dot on the right (matching a span-calibration
+// instrument's green "all OK" indicator); returns the y content stays above
 static int DrawStatusBar(HDC dc, const RECT &rc,
-                         const std::vector<std::string> &segments)
+                         const std::vector<std::string> &segments, bool ok = true)
 {
     const int h = 28;
     RECT bar = rc; bar.top = bar.bottom - h;
@@ -163,6 +188,16 @@ static int DrawStatusBar(HDC dc, const RECT &rc,
         GetTextExtentPoint32A(dc, s.c_str(), (int)s.size(), &sz);
         x += sz.cx + 14;
         if(x > rc.right - 40) break;
+    }
+    {
+        int cx = rc.right - 20, cy = (bar.top + bar.bottom) / 2, r = 6;
+        HBRUSH dot = CreateSolidBrush(ok ? kBaseGreen : kAlarmRed);
+        HGDIOBJ oldBrush = SelectObject(dc, dot);
+        HPEN dotPen = CreatePen(PS_SOLID, 1, kHeaderFg);
+        HGDIOBJ oldPen = SelectObject(dc, dotPen);
+        Ellipse(dc, cx - r, cy - r, cx + r, cy + r);
+        SelectObject(dc, oldBrush); SelectObject(dc, oldPen);
+        DeleteObject(dot); DeleteObject(dotPen);
     }
     SelectObject(dc, old);
     SetTextColor(dc, RGB(0,0,0));
@@ -368,14 +403,19 @@ static int DrawToolbar(HDC dc, const RECT &rc, bool running)
         SetBkMode(dc, TRANSPARENT);
         DrawToolIcon(dc, id, r, enabled);
     }
-    // right-aligned title
+    // right-aligned title + live clock, matching a span-calibration
+    // instrument's header (title bar with the current time top-right)
     SelectObject(dc, g_font_ui_bold);
     SetTextColor(dc, kHeaderFg);
-    const char *title = "GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64";
+    char tbuf[16];
+    std::time_t t = std::time(nullptr);
+    std::strftime(tbuf, sizeof tbuf, "%I:%M:%S %p", std::localtime(&t));
+    const char *clock = tbuf[0] == '0' ? tbuf + 1 : tbuf;   // no leading zero on the hour
+    std::string title = std::string("GC301c GAS CHROMATOGRAPH  \xb7  WPEAK64   ") + clock;
     SIZE sz;
-    GetTextExtentPoint32A(dc, title, (int)strlen(title), &sz);
+    GetTextExtentPoint32A(dc, title.c_str(), (int)title.size(), &sz);
     if(ToolButtonRect(n - 1).right + 24 + sz.cx < rc.right)
-        TextOutA(dc, rc.right - sz.cx - 16, strip.top + 12, title, (int)strlen(title));
+        TextOutA(dc, rc.right - sz.cx - 16, strip.top + 12, title.c_str(), (int)title.size());
     SelectObject(dc, oldFont);
     SetTextColor(dc, RGB(0,0,0));
     return strip.bottom + 3;
@@ -637,13 +677,16 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
         LineTo(dc, X((double)i), Y((double)trace[(size_t)i]));
 
     if(rows) {
-        HPEN posPen = CreatePen(PS_SOLID, 2, kAlarmRed);
-        HPEN negPen = CreatePen(PS_SOLID, 2, kNegOrange);
         SelectObject(dc, g_font_ui);
         for(const ReportRow &r : *rows) {
             const Peak &p = r.peak;
             bool neg = p.Height < 0;
-            SelectObject(dc, neg ? negPen : posPen);
+            // identified components keep one consistent color between the
+            // trace, the peak table and the element table (CompColor);
+            // alarms still take priority so an out-of-limit peak stands out.
+            COLORREF col = neg ? kNegOrange : r.alarm ? kAlarmRed : CompColor(r.component);
+            HPEN pen = CreatePen(PS_SOLID, 2, col);
+            SelectObject(dc, pen);
             int xa = X((double)p.From), xb = X((double)p.To), xm = X((double)p.Time);
             int yb = Y((double)baseline);
             MoveToEx(dc, xa, yb - 6, nullptr); LineTo(dc, xa, yb + 6);
@@ -652,7 +695,7 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
 
             int yap = Y((double)(baseline + p.Height));
             char lbl[64]; int len;
-            SetTextColor(dc, neg ? kNegOrange : kAlarmRed);
+            SetTextColor(dc, col);
             if(neg) {
                 // numbered in the same sequence as positive peaks (see
                 // Integrator::DetectNegativePeak), shown alongside "NEG" so
@@ -663,17 +706,23 @@ static void PaintTrace(HDC dc, RECT plot, const std::vector<long> &trace,
                 len = std::snprintf(lbl, sizeof lbl, "NEG");
                 TextOutA(dc, xm - 12, yap + 24, lbl, len);
             }
+            else if(r.component >= 0) {
+                // name / area / height stacked above the peak, matching a
+                // span-calibration instrument's colored component readout
+                len = (int)r.name.size();
+                TextOutA(dc, xm - 4 * len, yap - 54, r.name.c_str(), len);
+                len = std::snprintf(lbl, sizeof lbl, "A %.2f", p.Area);
+                TextOutA(dc, xm - 4 * len, yap - 38, lbl, len);
+                len = std::snprintf(lbl, sizeof lbl, "H %ld", p.Height);
+                TextOutA(dc, xm - 4 * len, yap - 22, lbl, len);
+            }
             else {
                 len = std::snprintf(lbl, sizeof lbl, "%d", p.Num);
                 TextOutA(dc, xm - 4, yap - 18, lbl, len);
-                if(r.component >= 0) {
-                    len = (int)r.name.size();
-                    TextOutA(dc, xm - 4 * len, yap - 36, r.name.c_str(), len);
-                }
             }
+            DeleteObject(pen);
         }
         SetTextColor(dc, RGB(0,0,0));
-        DeleteObject(posPen); DeleteObject(negPen);
     }
     SelectObject(dc, oldPen);
     SelectObject(dc, oldFont);
@@ -771,7 +820,7 @@ static void PaintMain(HDC dc, const RECT &rc)
                                            : BaseName(g_method_path).c_str()));
     segs.push_back("CAL " + std::string(g_cal_path.empty() ? "none"
                                         : BaseName(g_cal_path).c_str()));
-    int bottom = DrawStatusBar(dc, rc, segs);
+    int bottom = DrawStatusBar(dc, rc, segs, alarm == ALARM_NONE);
 
     int total = bottom - top;
     if(total < 80) return;
@@ -829,7 +878,8 @@ static void PaintMain(HDC dc, const RECT &rc)
                 p.Height, 100.0 * p.Height / habs,
                 p.Area,   100.0 * p.Area / aabs,
                 FmtTimeMS((double)p.Time / g_method.data_rate).c_str(), al);
-            SetTextColor(dc, r.alarm ? kAlarmRed : neg ? kNegOrange : RGB(30,32,34));
+            SetTextColor(dc, r.alarm ? kAlarmRed : neg ? kNegOrange
+                             : r.component >= 0 ? CompColor(r.component) : RGB(30,32,34));
             TextOutA(dc, 20, ty, line, len); ty += 18;
         }
         SetTextColor(dc, RGB(0,0,0));
@@ -977,7 +1027,7 @@ static void PaintMain(HDC dc, const RECT &rc)
                 c.name.c_str(), c.peak_rt, c.window, c.response,
                 c.alarm_high, c.alarm_low, cal, conc, al);
             SetTextColor(dc, (last && last->alarm) ? kAlarmRed
-                             : c.active_yn ? RGB(30,32,34) : kGridGray);
+                             : !c.active_yn ? kGridGray : CompColor((int)i));
             TextOutA(dc, 20, ty, line, len); ty += 17;
         }
         if(g_method.components.empty()) {
